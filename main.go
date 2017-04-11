@@ -57,7 +57,11 @@ func (agent *Agent) Ping() error {
 	// for {
 	status, err := agent.Client.Post(pingURI, nil, nil)
 	if err != nil {
-		return err
+		log.Println("Trying to register lost agent")
+		newAgentOpts := CreateAgentOptions{
+			Hostname: agent.Hostname,
+		}
+		return agent.Create(&newAgentOpts)
 	}
 	if status != 200 {
 		return fmt.Errorf("Ping to %s returns %d\n", pingURI, status)
