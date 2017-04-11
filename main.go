@@ -36,9 +36,8 @@ func (agent *Agent) Create(opt *CreateAgentOptions) error {
 	}
 	if status != 200 {
 		return fmt.Errorf("Failed to create agent http code: %d", status)
-	} else {
-		log.Printf("Agent %s registered with hostname %s\n", agent.ID, agent.Hostname)
 	}
+	log.Printf("Agent %s registered with hostname %s\n", agent.ID, agent.Hostname)
 	return nil
 }
 
