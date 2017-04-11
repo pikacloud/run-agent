@@ -1,8 +1,11 @@
 package main
 
 import (
+	"encoding/json"
+	"io/ioutil"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"testing"
 )
 
@@ -42,5 +45,19 @@ func TestMakeRequest(t *testing.T) {
 	// test that relative URL was expanded with the proper BaseURL
 	if req.URL.String() != outURL {
 		t.Errorf("NewRequest(%v) URL = %v, want %v", inURL, req.URL, outURL)
+	}
+}
+
+func testRequestJSON(t *testing.T, r *http.Request, values map[string]interface{}) {
+	var dat map[string]interface{}
+
+	body, _ := ioutil.ReadAll(r.Body)
+
+	if err := json.Unmarshal(body, &dat); err != nil {
+		t.Errorf("Could not decode json body: %v", err)
+	}
+
+	if !reflect.DeepEqual(values, dat) {
+		t.Errorf("Request parameters = %v, want %v", dat, values)
 	}
 }

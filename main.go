@@ -16,22 +16,28 @@ const (
 
 // Agent describes the agent
 type Agent struct {
-	Client  *Client
-	ID      string `json:"aid"`
-	PingURL string `json:"ping_url"`
-	TTL     int    `json:"ttl"`
+	Client   *Client
+	ID       string `json:"aid"`
+	PingURL  string `json:"ping_url"`
+	TTL      int    `json:"ttl"`
+	Hostname string `json:"hostname"`
+}
+
+// CreateAgentOptions represents the agent Create() options
+type CreateAgentOptions struct {
+	Hostname string `json:"hostname"`
 }
 
 // Create an agent
-func (agent *Agent) Create() error {
-	status, err := agent.Client.Post("run/agents/", nil, &agent)
+func (agent *Agent) Create(opt *CreateAgentOptions) error {
+	status, err := agent.Client.Post("run/agents/", opt, &agent)
 	if err != nil {
-		log.Fatalf(err.Error())
+		return fmt.Errorf(err.Error())
 	}
 	if status != 200 {
-		log.Fatalf("Failed to create agent http code: %d", status)
+		return fmt.Errorf("Failed to create agent http code: %d", status)
 	}
-	log.Printf("Agent %s registered\n", agent.ID)
+	log.Printf("Agent %s registered with hostname %s\n", agent.ID, agent.Hostname)
 	return nil
 }
 
@@ -65,6 +71,10 @@ func main() {
 	if apiToken == "" {
 		log.Fatalln("PIKACLOUD_API_TOKEN is empty")
 	}
+	hostname, err := os.Hostname()
+	if err != nil {
+		log.Fatalf("Unable to retrieve agent hostname: %v", err)
+	}
 	if baseURL == "" {
 		baseURL = defaultBaseURL
 	}
@@ -72,9 +82,16 @@ func main() {
 	c.BaseURL = baseURL
 
 	agent := Agent{
-		Client: c,
+		Client:   c,
+		Hostname: hostname,
 	}
-	agent.Create()
+	newAgentOpts := CreateAgentOptions{
+		Hostname: hostname,
+	}
+	err = agent.Create(&newAgentOpts)
+	if err != nil {
+		log.Fatal(err)
+	}
 	wg := sync.WaitGroup{}
 	defer wg.Wait()
 
