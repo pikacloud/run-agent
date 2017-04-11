@@ -1,7 +1,6 @@
 package main
 
 import (
-	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -23,19 +22,6 @@ type Agent struct {
 	TTL     int    `json:"ttl"`
 }
 
-// CreateAgent creates an agent
-func (client *Client) CreateAgent() (Agent, error) {
-	res := Agent{}
-	status, err := client.Post("run/agents/", nil, &res)
-	if err != nil {
-		return Agent{}, err
-	}
-	if status == 200 {
-		return res, nil
-	}
-	return res, errors.New("Failed to create agent")
-}
-
 // Create an agent
 func (agent *Agent) Create() error {
 	status, err := agent.Client.Post("run/agents/", nil, &agent)
@@ -49,23 +35,28 @@ func (agent *Agent) Create() error {
 	return nil
 }
 
-// Ping agent
-func (agent *Agent) Ping() {
-	pingURI := fmt.Sprintf("run/agents/%s/ping/", agent.ID)
+func (agent *Agent) infinitePing() {
 	for {
-		status, err := agent.Client.Post(pingURI, nil, nil)
+		err := agent.Ping()
 		if err != nil {
 			log.Println(err)
 		}
-
-		if status == 200 {
-			fmt.Println("Ping OK")
-		} else {
-			fmt.Printf("Ping to %s returns %d\n", pingURI, status)
-		}
-		// }()
-		time.Sleep(1000 * time.Millisecond)
+		time.Sleep(3 * time.Second)
 	}
+}
+
+// Ping agent
+func (agent *Agent) Ping() error {
+	pingURI := fmt.Sprintf("run/agents/%s/ping/", agent.ID)
+	// for {
+	status, err := agent.Client.Post(pingURI, nil, nil)
+	if err != nil {
+		return err
+	}
+	if status != 200 {
+		return fmt.Errorf("Ping to %s returns %d\n", pingURI, status)
+	}
+	return nil
 }
 
 func main() {
@@ -79,10 +70,7 @@ func main() {
 	}
 	c := NewClient(apiToken)
 	c.BaseURL = baseURL
-	// agent, err := c.CreateAgent()
-	// if err != nil {
-	// 	log.Fatalln(err.Error())
-	// }
+
 	agent := Agent{
 		Client: c,
 	}
@@ -91,8 +79,6 @@ func main() {
 	defer wg.Wait()
 
 	wg.Add(1)
-	go func() {
+	agent.infinitePing()
 
-		agent.Ping()
-	}()
 }

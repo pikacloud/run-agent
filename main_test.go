@@ -29,11 +29,22 @@ func TestAgentCreate(t *testing.T) {
 	if a.ID != "toto" {
 		t.Errorf("Agent ID=%v, want %v", a.ID, "toto")
 	}
-	agent, err := client.CreateAgent()
-	if err != nil {
-		t.Errorf("Cannot create agent: %v", err)
+}
+
+func TestAgentPing(t *testing.T) {
+	setup()
+	defer teardown()
+
+	mux.HandleFunc("/v1/run/agents/toto/ping/", func(w http.ResponseWriter, r *http.Request) {
+		testMethod(t, r, "POST")
+		fmt.Fprint(w, `{"status": "OK"}`)
+	})
+	a := Agent{
+		Client: client,
+		ID:     "toto",
 	}
-	if agent.ID != "toto" {
-		t.Errorf("Agent ID=%v, want %v", agent.ID, "toto")
+	err := a.Ping()
+	if err != nil {
+		t.Errorf("Ping test fails: %v", err)
 	}
 }
