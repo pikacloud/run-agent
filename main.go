@@ -47,6 +47,7 @@ func (agent *Agent) infinitePing() {
 		if err != nil {
 			log.Println(err)
 		}
+		log.Println("Ping OK")
 		time.Sleep(3 * time.Second)
 	}
 }
@@ -98,8 +99,9 @@ func main() {
 	}
 	wg := sync.WaitGroup{}
 	defer wg.Wait()
-
 	wg.Add(1)
-	agent.infinitePing()
+	go agent.infinitePing()
+	wg.Add(1)
+	go agent.syncDockerInfo()
 
 }
