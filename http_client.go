@@ -101,6 +101,20 @@ func (client *Client) sendRequest(method, path string, body io.Reader) (string, 
 	return string(responseBytes), resp.StatusCode, nil
 }
 
+// Get method
+func (client *Client) Get(path string, val interface{}) error {
+	body, _, err := client.sendRequest("GET", path, nil)
+	if err != nil {
+		return err
+	}
+
+	if err = json.Unmarshal([]byte(body), &val); err != nil {
+		return err
+	}
+
+	return nil
+}
+
 // Delete method
 func (client *Client) Delete(path string, val interface{}) error {
 	_, _, err := client.sendRequest("DELETE", path, nil)

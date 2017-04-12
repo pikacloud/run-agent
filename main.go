@@ -28,6 +28,13 @@ type CreateAgentOptions struct {
 	Hostname string `json:"hostname"`
 }
 
+// Task descibres a task
+type Task struct {
+	ID      string `json:"tid"`
+	Payload string `json:"payload"`
+	NeedACK bool   `json:"need_ack"`
+}
+
 // Create an agent
 func (agent *Agent) Create(opt *CreateAgentOptions) error {
 	status, err := agent.Client.Post("run/agents/", opt, &agent)
@@ -70,6 +77,30 @@ func (agent *Agent) Ping() error {
 	return nil
 }
 
+func (agent *Agent) infinitePullTasks() {
+	for {
+		tasks, err := agent.pullTasks()
+		if err != nil {
+			log.Println(err)
+		}
+		if len(tasks) > 0 {
+			log.Printf("Got %d new tasks", len(tasks))
+		}
+		time.Sleep(1 * time.Second)
+	}
+}
+
+func (agent *Agent) pullTasks() ([]Task, error) {
+	tasksURI := fmt.Sprintf("run/agents/%s/tasks/?requeue=false&size=50", agent.ID)
+	tasks := []Task{}
+	err := agent.Client.Get(tasksURI, &tasks)
+	if err != nil {
+		log.Println(err)
+		return nil, err
+	}
+	return tasks, nil
+}
+
 func main() {
 	apiToken := os.Getenv("PIKACLOUD_API_TOKEN")
 	baseURL := os.Getenv("PIKACLOUD_AGENT_URL")
@@ -105,5 +136,7 @@ func main() {
 	go agent.syncDockerInfo()
 	wg.Add(1)
 	go agent.syncDockerContainers()
+	wg.Add(1)
+	go agent.infinitePullTasks()
 
 }
