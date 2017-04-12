@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"time"
@@ -15,9 +16,10 @@ type AgentDockerInfo struct {
 	Info docker_types.Info `json:"info"`
 }
 
-// AgentContainers describes docker containers
-type AgentContainers struct {
-	Containers []docker_types.Container `json:"containers"`
+// AgentContainer describes docker container
+type AgentContainer struct {
+	ID   string `json:"cid"`
+	Data string `json:"data"`
 }
 
 func (agent *Agent) syncDockerInfo() {
@@ -56,17 +58,23 @@ func (agent *Agent) syncDockerContainers() {
 	for {
 		uri := fmt.Sprintf("run/agents/%s/docker/containers/", agent.ID)
 		containers, _ := cli.ContainerList(context.Background(), containersListOpts)
-		updateContainers := AgentContainers{
-			Containers: containers,
+		var containersCreateList []AgentContainer
+		for _, container := range containers {
+			data, err := json.Marshal(container)
+			if err != nil {
+				log.Printf("Cannot decode %v", container)
+				continue
+			}
+			containersCreateList = append(containersCreateList, AgentContainer{ID: container.ID, Data: string(data)})
 		}
-		status, err := agent.Client.Put(uri, updateContainers, nil)
+		status, err := agent.Client.Post(uri, containersCreateList, nil)
 		if err != nil {
 			log.Println(err.Error())
 		}
 		if status != 200 {
 			log.Printf("Failed to push docker containers: %d", status)
 		} else {
-			log.Printf("Sync docker %d containers OK", len(containers))
+			log.Printf("Sync docker %d containers OK", len(containersCreateList))
 		}
 		time.Sleep(3 * time.Second)
 	}
