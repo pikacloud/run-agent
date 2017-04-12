@@ -86,12 +86,22 @@ func (agent *Agent) infinitePullTasks() {
 		if len(tasks) > 0 {
 			log.Printf("Got %d new tasks", len(tasks))
 		}
+		for _, task := range tasks {
+			if task.NeedACK {
+				err := agent.ackTask(task)
+				if err != nil {
+					log.Printf("Unable to ack task %s: %s", task.ID, err)
+				}
+				log.Printf("task %s ACKed", task.ID)
+
+			}
+		}
 		time.Sleep(1 * time.Second)
 	}
 }
 
 func (agent *Agent) pullTasks() ([]Task, error) {
-	tasksURI := fmt.Sprintf("run/agents/%s/tasks/?requeue=false&size=50", agent.ID)
+	tasksURI := fmt.Sprintf("run/agents/%s/tasks/ready/?requeue=false&size=50", agent.ID)
 	tasks := []Task{}
 	err := agent.Client.Get(tasksURI, &tasks)
 	if err != nil {
@@ -99,6 +109,16 @@ func (agent *Agent) pullTasks() ([]Task, error) {
 		return nil, err
 	}
 	return tasks, nil
+}
+
+func (agent *Agent) ackTask(t Task) error {
+	ackURI := fmt.Sprintf("run/agents/%s/tasks/unack/%s/", agent.ID, t.ID)
+	err := agent.Client.Delete(ackURI, nil)
+	if err != nil {
+		log.Println(err)
+		return err
+	}
+	return nil
 }
 
 func main() {
