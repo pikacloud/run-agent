@@ -6,6 +6,8 @@ import (
 	"os"
 	"sync"
 	"time"
+
+	docker_client "github.com/docker/docker/client"
 )
 
 const (
@@ -14,13 +16,18 @@ const (
 	apiVersion     = "v1"
 )
 
+var (
+	agent *Agent
+)
+
 // Agent describes the agent
 type Agent struct {
-	Client   *Client
-	ID       string `json:"aid"`
-	PingURL  string `json:"ping_url"`
-	TTL      int    `json:"ttl"`
-	Hostname string `json:"hostname"`
+	Client       *Client
+	DockerClient *docker_client.Client
+	ID           string `json:"aid"`
+	PingURL      string `json:"ping_url"`
+	TTL          int    `json:"ttl"`
+	Hostname     string `json:"hostname"`
 }
 
 // CreateAgentOptions represents the agent Create() options
@@ -28,11 +35,50 @@ type CreateAgentOptions struct {
 	Hostname string `json:"hostname"`
 }
 
+// PluginConfig describes a plugin option
+type PluginConfig struct {
+}
+
+// TaskStep describes a step of a task
+type TaskStep struct {
+	Plugin            string          `json:"plugin"`
+	PluginConfig      []*PluginConfig `json:"plugin_options"`
+	Method            string          `json:"method"`
+	ExitOnFailure     bool            `json:"exit_on_failure"`
+	WaitForCompletion bool            `json:"wait_for_completion"`
+}
+
 // Task descibres a task
 type Task struct {
-	ID      string `json:"tid"`
-	Payload string `json:"payload"`
-	NeedACK bool   `json:"need_ack"`
+	ID      string      `json:"tid"`
+	Steps   []*TaskStep `json:"steps"`
+	NeedACK bool        `json:"need_ack"`
+}
+
+// Do a step
+func (step *TaskStep) Do() error {
+	switch step.Plugin {
+	case "docker":
+		return step.Docker()
+	default:
+		return fmt.Errorf("Unknown step plugin %s", step.Plugin)
+	}
+}
+
+// Docker runs a docker step
+func (step *TaskStep) Docker() error {
+	switch step.Method {
+	default:
+		return fmt.Errorf("Unknown step method %s", step.Method)
+	}
+}
+
+// Do a task
+func (task *Task) Do() error {
+	for _, step := range task.Steps {
+		step.Do()
+	}
+	return nil
 }
 
 // Create an agent
@@ -87,6 +133,11 @@ func (agent *Agent) infinitePullTasks() {
 			log.Printf("Got %d new tasks", len(tasks))
 		}
 		for _, task := range tasks {
+			err := task.Do()
+			if err != nil {
+				log.Printf("Unable to do task %s: %s", task.ID, err)
+			}
+			log.Printf("task %s done!", task.ID)
 			if task.NeedACK {
 				err := agent.ackTask(task)
 				if err != nil {
@@ -136,11 +187,16 @@ func main() {
 	}
 	c := NewClient(apiToken)
 	c.BaseURL = baseURL
-
-	agent := Agent{
-		Client:   c,
-		Hostname: hostname,
+	dockerClient, err := docker_client.NewEnvClient()
+	if err != nil {
+		panic(err)
 	}
+	_agent := Agent{
+		Client:       c,
+		Hostname:     hostname,
+		DockerClient: dockerClient,
+	}
+	agent = &_agent
 	newAgentOpts := CreateAgentOptions{
 		Hostname: hostname,
 	}

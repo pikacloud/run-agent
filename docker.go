@@ -8,7 +8,6 @@ import (
 	"time"
 
 	docker_types "github.com/docker/docker/api/types"
-	docker_client "github.com/docker/docker/client"
 )
 
 // AgentDockerInfo describes docker info
@@ -23,14 +22,9 @@ type AgentContainer struct {
 }
 
 func (agent *Agent) syncDockerInfo() {
-	cli, err := docker_client.NewEnvClient()
-	if err != nil {
-		panic(err)
-	}
-
 	for {
 		uri := fmt.Sprintf("run/agents/%s/docker/info/", agent.ID)
-		info, _ := cli.Info(context.Background())
+		info, _ := agent.DockerClient.Info(context.Background())
 		updateInfo := AgentDockerInfo{
 			Info: info,
 		}
@@ -48,16 +42,12 @@ func (agent *Agent) syncDockerInfo() {
 }
 
 func (agent *Agent) syncDockerContainers() {
-	cli, err := docker_client.NewEnvClient()
-	if err != nil {
-		panic(err)
-	}
 	containersListOpts := docker_types.ContainerListOptions{
 		All: true,
 	}
 	for {
 		uri := fmt.Sprintf("run/agents/%s/docker/containers/", agent.ID)
-		containers, _ := cli.ContainerList(context.Background(), containersListOpts)
+		containers, _ := agent.DockerClient.ContainerList(context.Background(), containersListOpts)
 		var containersCreateList []AgentContainer
 		for _, container := range containers {
 			data, err := json.Marshal(container)
@@ -78,4 +68,9 @@ func (agent *Agent) syncDockerContainers() {
 		}
 		time.Sleep(3 * time.Second)
 	}
+}
+
+// Run docker container
+func (agent *Agent) Run() {
+
 }
