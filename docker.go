@@ -8,7 +8,35 @@ import (
 	"time"
 
 	docker_types "github.com/docker/docker/api/types"
+	docker_types_container "github.com/docker/docker/api/types/container"
+	docker_types_network "github.com/docker/docker/api/types/network"
 )
+
+// DockerPorts describes docker ports for docker run
+type DockerPorts struct {
+	HostPort      int    `json:"host_port"`
+	ContainerPort int    `json:"container_port"`
+	Protocol      string `json:"protocol"`
+}
+
+// DockerStartOpts describes docker start options
+type DockerStartOpts struct {
+}
+
+// DockerCreateOpts describes docker run options
+type DockerCreateOpts struct {
+	Name       string         `json:"name"`
+	Image      string         `json:"image"`
+	Remove     bool           `json:"rm"`
+	Ports      []*DockerPorts `json:"ports"`
+	PublishAll bool           `json:"publish_all"`
+	Command    string         `json:"command"`
+}
+
+// DockerPullOpts describes docker pull options
+type DockerPullOpts struct {
+	Image string `json:"image"`
+}
 
 // AgentDockerInfo describes docker info
 type AgentDockerInfo struct {
@@ -19,6 +47,44 @@ type AgentDockerInfo struct {
 type AgentContainer struct {
 	ID   string `json:"cid"`
 	Data string `json:"data"`
+}
+
+func (agent *Agent) dockerPull(opts *DockerPullOpts) error {
+	ctx := context.Background()
+	pullOpts := docker_types.ImagePullOptions{}
+	out, err := agent.DockerClient.ImagePull(ctx, opts.Image, pullOpts)
+	if err != nil {
+		return err
+	}
+	defer out.Close()
+	log.Printf("New image pulled %s", opts.Image)
+	return nil
+}
+
+func (agent *Agent) dockerCreate(opts *DockerCreateOpts) (*docker_types_container.ContainerCreateCreatedBody, error) {
+	ctx := context.Background()
+	config := &docker_types_container.Config{
+		Image: opts.Image,
+	}
+	hostConfig := &docker_types_container.HostConfig{}
+	networkingConfig := &docker_types_network.NetworkingConfig{}
+
+	container, err := agent.DockerClient.ContainerCreate(ctx, config, hostConfig, networkingConfig, opts.Name)
+	if err != nil {
+		return nil, err
+	}
+	log.Printf("New container created %s", container.ID)
+	return &container, nil
+}
+
+func (agent *Agent) dockerStart(containerID string) error {
+	ctx := context.Background()
+	startOpts := docker_types.ContainerStartOptions{}
+	if err := agent.DockerClient.ContainerStart(ctx, containerID, startOpts); err != nil {
+		return err
+	}
+	log.Printf("New container started %s", containerID)
+	return nil
 }
 
 func (agent *Agent) syncDockerInfo() {

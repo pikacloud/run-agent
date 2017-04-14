@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"log"
 	"os"
@@ -42,7 +43,7 @@ type PluginConfig struct {
 // TaskStep describes a step of a task
 type TaskStep struct {
 	Plugin            string          `json:"plugin"`
-	PluginConfig      []*PluginConfig `json:"plugin_options"`
+	PluginConfig      json.RawMessage `json:"plugin_options"`
 	Method            string          `json:"method"`
 	ExitOnFailure     bool            `json:"exit_on_failure"`
 	WaitForCompletion bool            `json:"wait_for_completion"`
@@ -51,7 +52,7 @@ type TaskStep struct {
 // Task descibres a task
 type Task struct {
 	ID      string      `json:"tid"`
-	Steps   []*TaskStep `json:"steps"`
+	Steps   []*TaskStep `json:"payload"`
 	NeedACK bool        `json:"need_ack"`
 }
 
@@ -68,6 +69,38 @@ func (step *TaskStep) Do() error {
 // Docker runs a docker step
 func (step *TaskStep) Docker() error {
 	switch step.Method {
+	case "run":
+		var createOpts = DockerCreateOpts{}
+		err := json.Unmarshal([]byte(step.PluginConfig), &createOpts)
+		if err != nil {
+			return fmt.Errorf("Bad config for docker container run: %s (%v)", err, step.PluginConfig)
+		}
+		pullOpts := &DockerPullOpts{
+			Image: createOpts.Image,
+		}
+		err = agent.dockerPull(pullOpts)
+		if err != nil {
+			return err
+		}
+		containerCreated, err := agent.dockerCreate(&createOpts)
+		if err != nil {
+			return err
+		}
+		if err := agent.dockerStart(containerCreated.ID); err != nil {
+			return err
+		}
+		return nil
+	case "pull":
+		var pullOpts = DockerPullOpts{}
+		err := json.Unmarshal([]byte(step.PluginConfig), &pullOpts)
+		if err != nil {
+			return fmt.Errorf("Bad config for docker pull: %s (%v)", err, step.PluginConfig)
+		}
+		err = agent.dockerPull(&pullOpts)
+		if err != nil {
+			return err
+		}
+		return nil
 	default:
 		return fmt.Errorf("Unknown step method %s", step.Method)
 	}
@@ -76,7 +109,10 @@ func (step *TaskStep) Docker() error {
 // Do a task
 func (task *Task) Do() error {
 	for _, step := range task.Steps {
-		step.Do()
+		err := step.Do()
+		if err != nil {
+			log.Printf("Step %v failed on %s", step, err)
+		}
 	}
 	return nil
 }
@@ -100,7 +136,6 @@ func (agent *Agent) infinitePing() {
 		if err != nil {
 			log.Println(err)
 		}
-		log.Println("Ping OK")
 		time.Sleep(3 * time.Second)
 	}
 }
@@ -120,6 +155,7 @@ func (agent *Agent) Ping() error {
 	if status != 200 {
 		return fmt.Errorf("Ping to %s returns %d\n", pingURI, status)
 	}
+	log.Println("Ping OK")
 	return nil
 }
 
