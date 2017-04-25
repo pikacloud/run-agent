@@ -45,8 +45,9 @@ type AgentDockerInfo struct {
 
 // AgentContainer describes docker container
 type AgentContainer struct {
-	ID   string `json:"cid"`
-	Data string `json:"data"`
+	ID        string `json:"cid"`
+	Container string `json:"container"`
+	Config    string `json:"config"`
 }
 
 func (agent *Agent) dockerPull(opts *DockerPullOpts) error {
@@ -121,7 +122,21 @@ func (agent *Agent) syncDockerContainers() {
 				log.Printf("Cannot decode %v", container)
 				continue
 			}
-			containersCreateList = append(containersCreateList, AgentContainer{ID: container.ID, Data: string(data)})
+			inspect, err := agent.DockerClient.ContainerInspect(context.Background(), container.ID)
+			if err != nil {
+				log.Printf("Cannot inspect container %v", err)
+			}
+			inspectConfig, err := json.Marshal(inspect)
+			if err != nil {
+				log.Printf("Cannot decode %v", inspect)
+				continue
+			}
+			containersCreateList = append(containersCreateList,
+				AgentContainer{
+					ID:        container.ID,
+					Container: string(data),
+					Config:    string(inspectConfig),
+				})
 		}
 		status, err := agent.Client.Post(uri, containersCreateList, nil)
 		if err != nil {
