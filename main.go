@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -227,6 +228,11 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
+	_, err = dockerClient.ServerVersion(context.Background())
+	if err != nil {
+		panic(err)
+	}
+
 	_agent := Agent{
 		Client:       c,
 		Hostname:     hostname,
