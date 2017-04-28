@@ -31,6 +31,7 @@ type DockerCreateOpts struct {
 	Ports      []*DockerPorts `json:"ports"`
 	PublishAll bool           `json:"publish_all"`
 	Command    string         `json:"command"`
+	Env        []string       `json:"env"`
 }
 
 // DockerPullOpts describes docker pull options
@@ -66,6 +67,7 @@ func (agent *Agent) dockerCreate(opts *DockerCreateOpts) (*docker_types_containe
 	ctx := context.Background()
 	config := &docker_types_container.Config{
 		Image: opts.Image,
+		Env:   opts.Env,
 	}
 	hostConfig := &docker_types_container.HostConfig{}
 	networkingConfig := &docker_types_network.NetworkingConfig{}
@@ -108,47 +110,44 @@ func (agent *Agent) syncDockerInfo() {
 	}
 }
 
-func (agent *Agent) syncDockerContainers() {
+func (agent *Agent) syncDockerContainers() error {
 	containersListOpts := docker_types.ContainerListOptions{
 		All: true,
 	}
-	for {
-		uri := fmt.Sprintf("run/agents/%s/docker/containers/", agent.ID)
-		containers, _ := agent.DockerClient.ContainerList(context.Background(), containersListOpts)
-		var containersCreateList []AgentContainer
-		for _, container := range containers {
-			data, err := json.Marshal(container)
-			if err != nil {
-				log.Printf("Cannot decode %v", container)
-				continue
-			}
-			inspect, err := agent.DockerClient.ContainerInspect(context.Background(), container.ID)
-			if err != nil {
-				log.Printf("Cannot inspect container %v", err)
-			}
-			inspectConfig, err := json.Marshal(inspect)
-			if err != nil {
-				log.Printf("Cannot decode %v", inspect)
-				continue
-			}
-			containersCreateList = append(containersCreateList,
-				AgentContainer{
-					ID:        container.ID,
-					Container: string(data),
-					Config:    string(inspectConfig),
-				})
-		}
-		status, err := agent.Client.Post(uri, containersCreateList, nil)
+	uri := fmt.Sprintf("run/agents/%s/docker/containers/", agent.ID)
+	containers, _ := agent.DockerClient.ContainerList(context.Background(), containersListOpts)
+	var containersCreateList []AgentContainer
+	for _, container := range containers {
+		data, err := json.Marshal(container)
 		if err != nil {
-			log.Println(err.Error())
+			log.Printf("Cannot decode %v", container)
+			continue
 		}
-		if status != 200 {
-			log.Printf("Failed to push docker containers: %d", status)
-		} else {
-			log.Printf("Sync docker %d containers OK", len(containersCreateList))
+		inspect, err := agent.DockerClient.ContainerInspect(context.Background(), container.ID)
+		if err != nil {
+			log.Printf("Cannot inspect container %v", err)
 		}
-		time.Sleep(3 * time.Second)
+		inspectConfig, err := json.Marshal(inspect)
+		if err != nil {
+			log.Printf("Cannot decode %v", inspect)
+			continue
+		}
+		containersCreateList = append(containersCreateList,
+			AgentContainer{
+				ID:        container.ID,
+				Container: string(data),
+				Config:    string(inspectConfig),
+			})
 	}
+	status, err := agent.Client.Post(uri, containersCreateList, nil)
+	if err != nil {
+		return err
+	}
+	if status != 200 {
+		return fmt.Errorf("Failed to push docker containers: %d", status)
+	}
+	log.Printf("Sync docker %d containers OK", len(containersCreateList))
+	return nil
 }
 
 // Run docker container

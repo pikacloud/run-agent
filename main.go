@@ -90,6 +90,7 @@ func (step *TaskStep) Docker() error {
 		if err := agent.dockerStart(containerCreated.ID); err != nil {
 			return err
 		}
+		agent.syncDockerContainers()
 		return nil
 	case "pull":
 		var pullOpts = DockerPullOpts{}
@@ -158,6 +159,16 @@ func (agent *Agent) Ping() error {
 	}
 	log.Println("Ping OK")
 	return nil
+}
+
+func (agent *Agent) infiniteSyncDockerContainers() {
+	for {
+		err := agent.syncDockerContainers()
+		if err != nil {
+			log.Println(err)
+		}
+		time.Sleep(3 * time.Second)
+	}
 }
 
 func (agent *Agent) infinitePullTasks() {
@@ -253,7 +264,7 @@ func main() {
 	wg.Add(1)
 	go agent.syncDockerInfo()
 	wg.Add(1)
-	go agent.syncDockerContainers()
+	go agent.infiniteSyncDockerContainers()
 	wg.Add(1)
 	go agent.infinitePullTasks()
 
