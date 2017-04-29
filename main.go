@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	docker_types "github.com/docker/docker/api/types"
 	docker_client "github.com/docker/docker/client"
 )
 
@@ -90,7 +91,7 @@ func (step *TaskStep) Docker() error {
 		if err := agent.dockerStart(containerCreated.ID); err != nil {
 			return err
 		}
-		agent.syncDockerContainers()
+		agent.syncDockerContainers(&containers)
 		return nil
 	case "pull":
 		var pullOpts = DockerPullOpts{}
@@ -113,7 +114,7 @@ func (task *Task) Do() error {
 	for _, step := range task.Steps {
 		err := step.Do()
 		if err != nil {
-			log.Printf("Step %v failed on %s", step, err)
+			log.Printf("%s Step %s failed with config %s (%s)", step.Plugin, step.Method, step.PluginConfig, err)
 		}
 	}
 	return nil
@@ -161,13 +162,17 @@ func (agent *Agent) Ping() error {
 	return nil
 }
 
+var containers []docker_types.Container
+
 func (agent *Agent) infiniteSyncDockerContainers() {
+
 	for {
-		err := agent.syncDockerContainers()
+		log.Printf("Sync seen previously %d containers", len(containers))
+		err := agent.syncDockerContainers(&containers)
 		if err != nil {
 			log.Println(err)
 		}
-		time.Sleep(3 * time.Second)
+		time.Sleep(1 * time.Second)
 	}
 }
 

@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"io/ioutil"
 	"log"
 	"time"
 
@@ -34,6 +36,11 @@ type DockerCreateOpts struct {
 	Env        []string       `json:"env"`
 }
 
+// DockerPingOpts describes the structure to ping docker containers in pikacloud API
+type DockerPingOpts struct {
+	Containers []string `json:"containers_id"`
+}
+
 // DockerPullOpts describes docker pull options
 type DockerPullOpts struct {
 	Image string `json:"image"`
@@ -52,6 +59,7 @@ type AgentContainer struct {
 }
 
 func (agent *Agent) dockerPull(opts *DockerPullOpts) error {
+	log.Printf("Pulling %s", opts.Image)
 	ctx := context.Background()
 	pullOpts := docker_types.ImagePullOptions{}
 	out, err := agent.DockerClient.ImagePull(ctx, opts.Image, pullOpts)
@@ -59,6 +67,9 @@ func (agent *Agent) dockerPull(opts *DockerPullOpts) error {
 		return err
 	}
 	defer out.Close()
+	if _, err = io.Copy(ioutil.Discard, out); err != nil {
+		return err
+	}
 	log.Printf("New image pulled %s", opts.Image)
 	return nil
 }
@@ -110,14 +121,53 @@ func (agent *Agent) syncDockerInfo() {
 	}
 }
 
-func (agent *Agent) syncDockerContainers() error {
+func (agent *Agent) syncDockerContainers(containersStore *[]docker_types.Container) error {
 	containersListOpts := docker_types.ContainerListOptions{
 		All: true,
 	}
 	uri := fmt.Sprintf("run/agents/%s/docker/containers/", agent.ID)
-	containers, _ := agent.DockerClient.ContainerList(context.Background(), containersListOpts)
+	containerPingURI := fmt.Sprintf("run/agents/%s/docker/containers/?ping", agent.ID)
+	var containers []docker_types.Container
+	containers, _ = agent.DockerClient.ContainerList(context.Background(), containersListOpts)
+	// garbase dead containers
+	for _, pastContainer := range *containersStore {
+		isAbsent := true
+		for _, nowContainer := range containers {
+			if nowContainer.ID == pastContainer.ID {
+				isAbsent = false
+			}
+		}
+		if isAbsent {
+			deleteContainerURI := fmt.Sprintf("run/agents/%s/docker/containers/%s/", agent.ID, pastContainer.ID)
+			err := agent.Client.Delete(deleteContainerURI, nil)
+			if err != nil {
+				log.Printf("Garbage collector failing for container %s, %v", pastContainer.ID, err)
+			} else {
+				log.Printf("Container %s garbage collected", pastContainer.ID)
+			}
+		}
+	}
+
 	var containersCreateList []AgentContainer
+	var containersPingList []AgentContainer
 	for _, container := range containers {
+		noChanges := false
+		for _, pastContainer := range *containersStore {
+			if container.ID == pastContainer.ID {
+				if pastContainer.State == container.State {
+					noChanges = true
+				} else {
+					log.Printf("Sync container %s", container.ID)
+				}
+			}
+		}
+		if noChanges {
+			containersPingList = append(containersPingList,
+				AgentContainer{
+					ID: container.ID,
+				})
+			continue
+		}
 		data, err := json.Marshal(container)
 		if err != nil {
 			log.Printf("Cannot decode %v", container)
@@ -139,14 +189,28 @@ func (agent *Agent) syncDockerContainers() error {
 				Config:    string(inspectConfig),
 			})
 	}
-	status, err := agent.Client.Post(uri, containersCreateList, nil)
-	if err != nil {
-		return err
+	*containersStore = containers
+	if len(containersPingList) > 0 {
+		status, err := agent.Client.Post(containerPingURI, containersPingList, nil)
+		if err != nil {
+			return err
+		}
+		if status != 200 {
+			return fmt.Errorf("Failed to ping docker containers: %d", status)
+		}
+		log.Printf("Pinging %d docker containers", len(containersPingList))
 	}
-	if status != 200 {
-		return fmt.Errorf("Failed to push docker containers: %d", status)
+	if len(containersCreateList) > 0 {
+		status, err := agent.Client.Post(uri, containersCreateList, nil)
+		if err != nil {
+			return err
+		}
+		if status != 200 {
+			return fmt.Errorf("Failed to push docker containers: %d", status)
+		}
+		log.Printf("Sync docker %d containers OK (%d new)", len(containers), len(containersCreateList))
 	}
-	log.Printf("Sync docker %d containers OK", len(containersCreateList))
+
 	return nil
 }
 
