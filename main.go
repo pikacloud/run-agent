@@ -172,7 +172,7 @@ func (agent *Agent) infiniteSyncDockerContainers() {
 		if err != nil {
 			log.Println(err)
 		}
-		time.Sleep(1 * time.Second)
+		time.Sleep(3 * time.Second)
 	}
 }
 
