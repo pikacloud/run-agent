@@ -7,6 +7,7 @@ import (
 	"io"
 	"io/ioutil"
 	"log"
+	"reflect"
 	"time"
 
 	docker_types "github.com/docker/docker/api/types"
@@ -102,20 +103,27 @@ func (agent *Agent) dockerStart(containerID string) error {
 }
 
 func (agent *Agent) syncDockerInfo() {
+	dockerInfoState := docker_types.Info{}
 	for {
 		uri := fmt.Sprintf("run/agents/%s/docker/info/", agent.ID)
 		info, _ := agent.DockerClient.Info(context.Background())
-		updateInfo := AgentDockerInfo{
+		pingInfo := AgentDockerInfo{
 			Info: info,
 		}
-		status, err := agent.Client.Put(uri, updateInfo, nil)
-		if err != nil {
-			log.Println(err.Error())
-		}
-		if status != 200 {
-			log.Printf("Failed to push docker info: %d", status)
-		} else {
-			log.Println("Sync docker info OK")
+		// compare
+		dockerInfoState.SystemTime = ""
+		info.SystemTime = ""
+		if !reflect.DeepEqual(dockerInfoState, info) {
+			status, err := agent.Client.Put(uri, pingInfo, nil)
+			if err != nil {
+				log.Println(err.Error())
+			}
+			if status != 200 {
+				log.Printf("Failed to push docker info: %d", status)
+			} else {
+				dockerInfoState = info
+				log.Println("Sync docker info OK")
+			}
 		}
 		time.Sleep(3 * time.Second)
 	}
@@ -126,7 +134,6 @@ func (agent *Agent) syncDockerContainers(containersStore *[]docker_types.Contain
 		All: true,
 	}
 	uri := fmt.Sprintf("run/agents/%s/docker/containers/", agent.ID)
-	containerPingURI := fmt.Sprintf("run/agents/%s/docker/containers/?ping", agent.ID)
 	var containers []docker_types.Container
 	containers, _ = agent.DockerClient.ContainerList(context.Background(), containersListOpts)
 	// garbase dead containers
@@ -149,23 +156,16 @@ func (agent *Agent) syncDockerContainers(containersStore *[]docker_types.Contain
 	}
 
 	var containersCreateList []AgentContainer
-	var containersPingList []AgentContainer
 	for _, container := range containers {
-		noChanges := false
+		hasChanged := true
 		for _, pastContainer := range *containersStore {
 			if container.ID == pastContainer.ID {
 				if pastContainer.State == container.State {
-					noChanges = true
-				} else {
-					log.Printf("Sync container %s", container.ID)
+					hasChanged = false
 				}
 			}
 		}
-		if noChanges {
-			containersPingList = append(containersPingList,
-				AgentContainer{
-					ID: container.ID,
-				})
+		if !hasChanged {
 			continue
 		}
 		data, err := json.Marshal(container)
@@ -190,16 +190,6 @@ func (agent *Agent) syncDockerContainers(containersStore *[]docker_types.Contain
 			})
 	}
 	*containersStore = containers
-	if len(containersPingList) > 0 {
-		status, err := agent.Client.Post(containerPingURI, containersPingList, nil)
-		if err != nil {
-			return err
-		}
-		if status != 200 {
-			return fmt.Errorf("Failed to ping docker containers: %d", status)
-		}
-		log.Printf("Pinging %d docker containers", len(containersPingList))
-	}
 	if len(containersCreateList) > 0 {
 		status, err := agent.Client.Post(uri, containersCreateList, nil)
 		if err != nil {
@@ -208,7 +198,7 @@ func (agent *Agent) syncDockerContainers(containersStore *[]docker_types.Contain
 		if status != 200 {
 			return fmt.Errorf("Failed to push docker containers: %d", status)
 		}
-		log.Printf("Sync docker %d containers OK (%d new)", len(containers), len(containersCreateList))
+		log.Printf("Sync docker %d containers of %d OK", len(containersCreateList), len(containers))
 	}
 
 	return nil

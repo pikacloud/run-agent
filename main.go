@@ -167,7 +167,6 @@ var containers []docker_types.Container
 func (agent *Agent) infiniteSyncDockerContainers() {
 
 	for {
-		log.Printf("Sync seen previously %d containers", len(containers))
 		err := agent.syncDockerContainers(&containers)
 		if err != nil {
 			log.Println(err)
