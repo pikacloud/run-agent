@@ -9,7 +9,6 @@ import (
 	"sync"
 	"time"
 
-	docker_types "github.com/docker/docker/api/types"
 	docker_client "github.com/docker/docker/client"
 )
 
@@ -58,6 +57,17 @@ type Task struct {
 	NeedACK bool        `json:"need_ack"`
 }
 
+// TaskACKStep represent a task step ACK
+type TaskACKStep struct {
+	Success bool   `json:"success"`
+	Message string `json:"message"`
+}
+
+// TaskACK reprensent a tack ACK
+type TaskACK struct {
+	TaskACKStep []*TaskACKStep `json:"results"`
+}
+
 // Do a step
 func (step *TaskStep) Do() error {
 	switch step.Plugin {
@@ -91,7 +101,6 @@ func (step *TaskStep) Docker() error {
 		if err := agent.dockerStart(containerCreated.ID); err != nil {
 			return err
 		}
-		agent.syncDockerContainers(&containers)
 		return nil
 	case "pull":
 		var pullOpts = DockerPullOpts{}
@@ -104,20 +113,72 @@ func (step *TaskStep) Docker() error {
 			return err
 		}
 		return nil
+	case "unpause":
+		var unpauseOpts = DockerUnpauseOpts{}
+		err := json.Unmarshal([]byte(step.PluginConfig), &unpauseOpts)
+		if err != nil {
+			return fmt.Errorf("Bad config for docker unpause: %s (%v)", err, step.PluginConfig)
+		}
+		err = agent.dockerUnpause(unpauseOpts.ID)
+		if err != nil {
+			return err
+		}
+		return nil
+	case "pause":
+		var pauseOpts = DockerPauseOpts{}
+		err := json.Unmarshal([]byte(step.PluginConfig), &pauseOpts)
+		if err != nil {
+			return fmt.Errorf("Bad config for docker pause: %s (%v)", err, step.PluginConfig)
+		}
+		err = agent.dockerPause(pauseOpts.ID)
+		if err != nil {
+			return err
+		}
+		return nil
+	case "start":
+		var startOpts = DockerStartOpts{}
+		err := json.Unmarshal([]byte(step.PluginConfig), &startOpts)
+		if err != nil {
+			return fmt.Errorf("Bad config for docker unpause: %s (%v)", err, step.PluginConfig)
+		}
+		err = agent.dockerStart(startOpts.ID)
+		if err != nil {
+			return err
+		}
+		return nil
+	case "stop":
+		var stopOpts = DockerStopOpts{}
+		err := json.Unmarshal([]byte(step.PluginConfig), &stopOpts)
+		if err != nil {
+			return fmt.Errorf("Bad config for docker unpause: %s (%v)", err, step.PluginConfig)
+		}
+		err = agent.dockerStop(stopOpts.ID, 10*time.Second)
+		if err != nil {
+			return err
+		}
+		return nil
 	default:
 		return fmt.Errorf("Unknown step method %s", step.Method)
 	}
 }
 
 // Do a task
-func (task *Task) Do() error {
+func (task *Task) Do() (TaskACK, error) {
+	ack := TaskACK{}
 	for _, step := range task.Steps {
+		ackStep := TaskACKStep{}
 		err := step.Do()
 		if err != nil {
 			log.Printf("%s Step %s failed with config %s (%s)", step.Plugin, step.Method, step.PluginConfig, err)
+			ackStep.Message = err.Error()
+			ackStep.Success = false
+		} else {
+			ackStep.Success = true
+			ackStep.Message = "OK"
 		}
+		ack.TaskACKStep = append(ack.TaskACKStep, &ackStep)
 	}
-	return nil
+	return ack, nil
 }
 
 // Create an agent
@@ -130,6 +191,7 @@ func (agent *Agent) Create(opt *CreateAgentOptions) error {
 		return fmt.Errorf("Failed to create agent http code: %d", status)
 	}
 	log.Printf("Agent %s registered with hostname %s\n", agent.ID, agent.Hostname)
+	go agent.syncDockerInfo()
 	return nil
 }
 
@@ -162,19 +224,6 @@ func (agent *Agent) Ping() error {
 	return nil
 }
 
-var containers []docker_types.Container
-
-func (agent *Agent) infiniteSyncDockerContainers() {
-
-	for {
-		err := agent.syncDockerContainers(&containers)
-		if err != nil {
-			log.Println(err)
-		}
-		time.Sleep(3 * time.Second)
-	}
-}
-
 func (agent *Agent) infinitePullTasks() {
 	for {
 		tasks, err := agent.pullTasks()
@@ -185,21 +234,22 @@ func (agent *Agent) infinitePullTasks() {
 			log.Printf("Got %d new tasks", len(tasks))
 		}
 		for _, task := range tasks {
-			err := task.Do()
+			ackTask, err := task.Do()
 			if err != nil {
 				log.Printf("Unable to do task %s: %s", task.ID, err)
 			}
 			log.Printf("task %s done!", task.ID)
 			if task.NeedACK {
-				err := agent.ackTask(task)
+				err := agent.ackTask(&task, &ackTask)
 				if err != nil {
 					log.Printf("Unable to ack task %s: %s", task.ID, err)
+				} else {
+					log.Printf("task %s ACKed", task.ID)
 				}
-				log.Printf("task %s ACKed", task.ID)
 
 			}
 		}
-		time.Sleep(1 * time.Second)
+		time.Sleep(3 * time.Second)
 	}
 }
 
@@ -214,9 +264,9 @@ func (agent *Agent) pullTasks() ([]Task, error) {
 	return tasks, nil
 }
 
-func (agent *Agent) ackTask(t Task) error {
-	ackURI := fmt.Sprintf("run/agents/%s/tasks/unack/%s/", agent.ID, t.ID)
-	err := agent.Client.Delete(ackURI, nil)
+func (agent *Agent) ackTask(task *Task, taskACK *TaskACK) error {
+	ackURI := fmt.Sprintf("run/agents/%s/tasks/unack/%s/", agent.ID, task.ID)
+	_, err := agent.Client.Delete(ackURI, &taskACK, nil)
 	if err != nil {
 		log.Println(err)
 		return err
@@ -266,9 +316,9 @@ func main() {
 	wg.Add(1)
 	go agent.infinitePing()
 	wg.Add(1)
-	go agent.syncDockerInfo()
+	agent.syncDockerContainers(syncDockerContainersOptions{})
 	wg.Add(1)
-	go agent.infiniteSyncDockerContainers()
+	go agent.listenDockerEvents()
 	wg.Add(1)
 	go agent.infinitePullTasks()
 
