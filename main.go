@@ -292,6 +292,7 @@ func main() {
 	apiToken := os.Getenv("PIKACLOUD_API_TOKEN")
 	baseURL := os.Getenv("PIKACLOUD_AGENT_URL")
 	hostname := os.Getenv("PIKACLOUD_AGENT_HOSTNAME")
+	labels := os.Getenv("PIKACLOUD_AGENT_LABELS")
 	if apiToken == "" {
 		log.Fatalln("PIKACLOUD_API_TOKEN is empty")
 	}
@@ -324,6 +325,7 @@ func main() {
 	agent = &_agent
 	newAgentOpts := CreateAgentOptions{
 		Hostname: hostname,
+		Labels:   makeLabels(labels),
 	}
 	err = agent.Create(&newAgentOpts)
 	if err != nil {
