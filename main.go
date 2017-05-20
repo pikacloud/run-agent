@@ -316,11 +316,12 @@ func main() {
 		panic(err)
 	}
 
-	agent := Agent{
+	_agent := Agent{
 		Client:       c,
 		Hostname:     hostname,
 		DockerClient: dockerClient,
 	}
+	agent = &_agent
 	newAgentOpts := CreateAgentOptions{
 		Hostname: hostname,
 	}
