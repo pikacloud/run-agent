@@ -28,13 +28,17 @@ func TestAgentCreate(t *testing.T) {
 		testRequestJSON(t, r, want)
 
 	})
+
 	a := Agent{
 		Client: client,
 	}
 	newAgentOpts := CreateAgentOptions{
 		Hostname: "tata",
 	}
-	a.Create(&newAgentOpts)
+	err := a.Create(&newAgentOpts)
+	if err != nil {
+		t.Errorf("Cannot create agent %+v", err)
+	}
 	if a.ID != "toto" {
 		t.Errorf("Agent ID=%v, want %v", a.ID, "toto")
 	}
@@ -55,6 +59,10 @@ func TestAgentPing(t *testing.T) {
 		Client: client,
 		ID:     "toto",
 	}
+	newAgentOpts := CreateAgentOptions{
+		Hostname: "tata",
+	}
+	a.Create(&newAgentOpts)
 	err := a.Ping()
 	if err != nil {
 		t.Errorf("Ping test fails: %v", err)

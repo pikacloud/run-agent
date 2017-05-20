@@ -64,6 +64,14 @@ type DockerStartOpts struct {
 	ID string `json:"id"`
 }
 
+// DockerRemoveOpts describes docker remove options
+type DockerRemoveOpts struct {
+	ID            string `json:"id"`
+	Force         bool   `json:"force"`
+	RemoveLinks   bool   `json:"remove_links"`
+	RemoveVolumes bool   `json:"remove_volumes"`
+}
+
 // AgentDockerInfo describes docker info
 type AgentDockerInfo struct {
 	Info docker_types.Info `json:"info"`
@@ -150,24 +158,35 @@ func (agent *Agent) dockerStop(containerID string, timeout time.Duration) error 
 	return nil
 }
 
-func (agent *Agent) syncDockerInfo() {
+func (agent *Agent) dockerRemove(containerID string, opts *DockerRemoveOpts) error {
+	removeOpts := docker_types.ContainerRemoveOptions{
+		Force:         opts.Force,
+		RemoveVolumes: opts.RemoveVolumes,
+		RemoveLinks:   opts.RemoveLinks,
+	}
+	ctx := context.Background()
+	if err := agent.DockerClient.ContainerRemove(ctx, containerID, removeOpts); err != nil {
+		return err
+	}
+	log.Printf("Container %s remove", containerID)
+	return nil
+}
+
+func (agent *Agent) infiniteSyncDockerInfo() {
 	dockerInfoState := docker_types.Info{}
 	for {
-		uri := fmt.Sprintf("run/agents/%s/docker/info/", agent.ID)
-		info, _ := agent.DockerClient.Info(context.Background())
-		pingInfo := AgentDockerInfo{
-			Info: info,
+		info, err := agent.DockerClient.Info(context.Background())
+		if err != nil {
+			time.Sleep(3 * time.Second)
+			continue
 		}
 		// compare
 		dockerInfoState.SystemTime = ""
 		info.SystemTime = ""
 		if !reflect.DeepEqual(dockerInfoState, info) {
-			status, err := agent.Client.Put(uri, pingInfo, nil)
+			err := agent.syncDockerInfo(info)
 			if err != nil {
-				log.Println(err.Error())
-			}
-			if status != 200 {
-				log.Printf("Failed to push docker info: %d", status)
+				log.Printf("Cannot sync docker info: %+v", err)
 			} else {
 				dockerInfoState = info
 				log.Println("Sync docker info OK")
@@ -175,6 +194,21 @@ func (agent *Agent) syncDockerInfo() {
 		}
 		time.Sleep(3 * time.Second)
 	}
+}
+
+func (agent *Agent) syncDockerInfo(info docker_types.Info) error {
+	uri := fmt.Sprintf("run/agents/%s/docker/info/", agent.ID)
+	pingInfo := AgentDockerInfo{
+		Info: info,
+	}
+	status, err := agent.Client.Put(uri, pingInfo, nil)
+	if err != nil {
+		return err
+	}
+	if status != 200 {
+		return fmt.Errorf("Failed to push docker info: %d", status)
+	}
+	return nil
 }
 
 func (agent *Agent) syncDockerContainers(opts syncDockerContainersOptions) error {

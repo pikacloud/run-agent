@@ -32,11 +32,6 @@ type Agent struct {
 	Hostname     string `json:"hostname"`
 }
 
-// CreateAgentOptions represents the agent Create() options
-type CreateAgentOptions struct {
-	Hostname string `json:"hostname"`
-}
-
 // PluginConfig describes a plugin option
 type PluginConfig struct {
 }
@@ -157,6 +152,17 @@ func (step *TaskStep) Docker() error {
 			return err
 		}
 		return nil
+	case "remove":
+		var removeOpts = DockerRemoveOpts{}
+		err := json.Unmarshal([]byte(step.PluginConfig), &removeOpts)
+		if err != nil {
+			return fmt.Errorf("Bad config for docker remove: %s (%v)", err, step.PluginConfig)
+		}
+		err = agent.dockerRemove(removeOpts.ID, &removeOpts)
+		if err != nil {
+			return err
+		}
+		return nil
 	default:
 		return fmt.Errorf("Unknown step method %s", step.Method)
 	}
@@ -191,7 +197,6 @@ func (agent *Agent) Create(opt *CreateAgentOptions) error {
 		return fmt.Errorf("Failed to create agent http code: %d", status)
 	}
 	log.Printf("Agent %s registered with hostname %s\n", agent.ID, agent.Hostname)
-	go agent.syncDockerInfo()
 	return nil
 }
 
@@ -199,7 +204,20 @@ func (agent *Agent) infinitePing() {
 	for {
 		err := agent.Ping()
 		if err != nil {
-			log.Println(err)
+			log.Printf("Cannot ping %+v", err)
+			log.Println("Trying to register lost agent")
+			newAgentOpts := CreateAgentOptions{
+				Hostname: agent.Hostname,
+			}
+			agent.Create(&newAgentOpts)
+			agent.syncDockerContainers(syncDockerContainersOptions{})
+			info, err := agent.DockerClient.Info(context.Background())
+			if err != nil {
+				log.Printf("Cannot fetch docker info %+v", err)
+			} else {
+				agent.syncDockerInfo(info)
+			}
+
 		}
 		time.Sleep(3 * time.Second)
 	}
@@ -211,11 +229,7 @@ func (agent *Agent) Ping() error {
 	// for {
 	status, err := agent.Client.Post(pingURI, nil, nil)
 	if err != nil {
-		log.Println("Trying to register lost agent")
-		newAgentOpts := CreateAgentOptions{
-			Hostname: agent.Hostname,
-		}
-		return agent.Create(&newAgentOpts)
+		return err
 	}
 	if status != 200 {
 		return fmt.Errorf("Ping to %s returns %d\n", pingURI, status)
@@ -277,12 +291,16 @@ func (agent *Agent) ackTask(task *Task, taskACK *TaskACK) error {
 func main() {
 	apiToken := os.Getenv("PIKACLOUD_API_TOKEN")
 	baseURL := os.Getenv("PIKACLOUD_AGENT_URL")
+	hostname := os.Getenv("PIKACLOUD_AGENT_HOSTNAME")
 	if apiToken == "" {
 		log.Fatalln("PIKACLOUD_API_TOKEN is empty")
 	}
-	hostname, err := os.Hostname()
-	if err != nil {
-		log.Fatalf("Unable to retrieve agent hostname: %v", err)
+	if hostname == "" {
+		h, err := os.Hostname()
+		if err != nil {
+			log.Fatalf("Unable to retrieve agent hostname: %v", err)
+		}
+		hostname = h
 	}
 	if baseURL == "" {
 		baseURL = defaultBaseURL
@@ -298,12 +316,11 @@ func main() {
 		panic(err)
 	}
 
-	_agent := Agent{
+	agent := Agent{
 		Client:       c,
 		Hostname:     hostname,
 		DockerClient: dockerClient,
 	}
-	agent = &_agent
 	newAgentOpts := CreateAgentOptions{
 		Hostname: hostname,
 	}
@@ -311,15 +328,15 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+	agent.syncDockerContainers(syncDockerContainersOptions{})
 	wg := sync.WaitGroup{}
 	defer wg.Wait()
 	wg.Add(1)
-	go agent.infinitePing()
+	go agent.infiniteSyncDockerInfo()
 	wg.Add(1)
-	agent.syncDockerContainers(syncDockerContainersOptions{})
+	go agent.infinitePing()
 	wg.Add(1)
 	go agent.listenDockerEvents()
 	wg.Add(1)
 	go agent.infinitePullTasks()
-
 }
