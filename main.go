@@ -325,8 +325,11 @@ func main() {
 	agent = &_agent
 	newAgentOpts := CreateAgentOptions{
 		Hostname: hostname,
-		Labels:   makeLabels(labels),
 	}
+	if labels != "" {
+		newAgentOpts.Labels = makeLabels(labels)
+	}
+
 	err = agent.Create(&newAgentOpts)
 	if err != nil {
 		log.Fatal(err)
