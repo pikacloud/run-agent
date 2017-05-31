@@ -26,10 +26,11 @@ var (
 type Agent struct {
 	Client       *Client
 	DockerClient *docker_client.Client
-	ID           string `json:"aid"`
-	PingURL      string `json:"ping_url"`
-	TTL          int    `json:"ttl"`
-	Hostname     string `json:"hostname"`
+	ID           string   `json:"aid"`
+	PingURL      string   `json:"ping_url"`
+	TTL          int      `json:"ttl"`
+	Hostname     string   `json:"hostname"`
+	Labels       []string `json:"labels"`
 }
 
 // PluginConfig describes a plugin option
@@ -208,6 +209,7 @@ func (agent *Agent) infinitePing() {
 			log.Println("Trying to register lost agent")
 			newAgentOpts := CreateAgentOptions{
 				Hostname: agent.Hostname,
+				Labels:   agent.Labels,
 			}
 			agent.Create(&newAgentOpts)
 			agent.syncDockerContainers(syncDockerContainersOptions{})
@@ -328,6 +330,7 @@ func main() {
 	}
 	if labels != "" {
 		newAgentOpts.Labels = makeLabels(labels)
+		_agent.Labels = makeLabels(labels)
 	}
 
 	err = agent.Create(&newAgentOpts)
