@@ -369,3 +369,98 @@ func (agent *Agent) listenDockerEvents() error {
 func (agent *Agent) Run() {
 
 }
+
+// Docker runs a docker step
+func (step *TaskStep) Docker() error {
+	switch step.Method {
+	case "run":
+		var createOpts = DockerCreateOpts{}
+		err := json.Unmarshal([]byte(step.PluginConfig), &createOpts)
+		if err != nil {
+			return fmt.Errorf("Bad config for docker container run: %s (%v)", err, step.PluginConfig)
+		}
+		pullOpts := &DockerPullOpts{
+			Image: createOpts.Image,
+		}
+		err = agent.dockerPull(pullOpts)
+		if err != nil {
+			return err
+		}
+		containerCreated, err := agent.dockerCreate(&createOpts)
+		if err != nil {
+			return err
+		}
+		if err := agent.dockerStart(containerCreated.ID); err != nil {
+			return err
+		}
+		return nil
+	case "pull":
+		var pullOpts = DockerPullOpts{}
+		err := json.Unmarshal([]byte(step.PluginConfig), &pullOpts)
+		if err != nil {
+			return fmt.Errorf("Bad config for docker pull: %s (%v)", err, step.PluginConfig)
+		}
+		err = agent.dockerPull(&pullOpts)
+		if err != nil {
+			return err
+		}
+		return nil
+	case "unpause":
+		var unpauseOpts = DockerUnpauseOpts{}
+		err := json.Unmarshal([]byte(step.PluginConfig), &unpauseOpts)
+		if err != nil {
+			return fmt.Errorf("Bad config for docker unpause: %s (%v)", err, step.PluginConfig)
+		}
+		err = agent.dockerUnpause(unpauseOpts.ID)
+		if err != nil {
+			return err
+		}
+		return nil
+	case "pause":
+		var pauseOpts = DockerPauseOpts{}
+		err := json.Unmarshal([]byte(step.PluginConfig), &pauseOpts)
+		if err != nil {
+			return fmt.Errorf("Bad config for docker pause: %s (%v)", err, step.PluginConfig)
+		}
+		err = agent.dockerPause(pauseOpts.ID)
+		if err != nil {
+			return err
+		}
+		return nil
+	case "start":
+		var startOpts = DockerStartOpts{}
+		err := json.Unmarshal([]byte(step.PluginConfig), &startOpts)
+		if err != nil {
+			return fmt.Errorf("Bad config for docker unpause: %s (%v)", err, step.PluginConfig)
+		}
+		err = agent.dockerStart(startOpts.ID)
+		if err != nil {
+			return err
+		}
+		return nil
+	case "stop":
+		var stopOpts = DockerStopOpts{}
+		err := json.Unmarshal([]byte(step.PluginConfig), &stopOpts)
+		if err != nil {
+			return fmt.Errorf("Bad config for docker unpause: %s (%v)", err, step.PluginConfig)
+		}
+		err = agent.dockerStop(stopOpts.ID, 10*time.Second)
+		if err != nil {
+			return err
+		}
+		return nil
+	case "remove":
+		var removeOpts = DockerRemoveOpts{}
+		err := json.Unmarshal([]byte(step.PluginConfig), &removeOpts)
+		if err != nil {
+			return fmt.Errorf("Bad config for docker remove: %s (%v)", err, step.PluginConfig)
+		}
+		err = agent.dockerRemove(removeOpts.ID, &removeOpts)
+		if err != nil {
+			return err
+		}
+		return nil
+	default:
+		return fmt.Errorf("Unknown step method %s", step.Method)
+	}
+}
