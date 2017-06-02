@@ -15,6 +15,7 @@ import (
 	docker_types_container "github.com/docker/docker/api/types/container"
 	docker_types_event "github.com/docker/docker/api/types/events"
 	docker_types_network "github.com/docker/docker/api/types/network"
+	"github.com/docker/docker/api/types/strslice"
 	docker_nat "github.com/docker/go-connections/nat"
 )
 
@@ -34,6 +35,7 @@ type DockerCreateOpts struct {
 	Ports      []*DockerPorts `json:"ports"`
 	PublishAll bool           `json:"publish_all"`
 	Command    string         `json:"command"`
+	Entrypoint string         `json:"entrypoint"`
 	Env        []string       `json:"env"`
 	Binds      []string       `json:"binds"`
 }
@@ -113,6 +115,12 @@ func (agent *Agent) dockerCreate(opts *DockerCreateOpts) (*docker_types_containe
 	config := &docker_types_container.Config{
 		Image: opts.Image,
 		Env:   opts.Env,
+	}
+	if opts.Entrypoint != "" {
+		config.Entrypoint = strslice.StrSlice{opts.Entrypoint}
+	}
+	if opts.Command != "" {
+		config.Cmd = strslice.StrSlice{opts.Command}
 	}
 	natPortmap := docker_nat.PortMap{}
 	for _, p := range opts.Ports {
