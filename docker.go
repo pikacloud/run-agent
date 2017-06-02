@@ -8,16 +8,19 @@ import (
 	"io/ioutil"
 	"log"
 	"reflect"
+	"strconv"
 	"time"
 
 	docker_types "github.com/docker/docker/api/types"
 	docker_types_container "github.com/docker/docker/api/types/container"
 	docker_types_event "github.com/docker/docker/api/types/events"
 	docker_types_network "github.com/docker/docker/api/types/network"
+	docker_nat "github.com/docker/go-connections/nat"
 )
 
 // DockerPorts describes docker ports for docker run
 type DockerPorts struct {
+	HostIP        string `json:"host_ip"`
 	HostPort      int    `json:"host_port"`
 	ContainerPort int    `json:"container_port"`
 	Protocol      string `json:"protocol"`
@@ -32,6 +35,7 @@ type DockerCreateOpts struct {
 	PublishAll bool           `json:"publish_all"`
 	Command    string         `json:"command"`
 	Env        []string       `json:"env"`
+	Binds      []string       `json:"binds"`
 }
 
 // DockerPingOpts describes the structure to ping docker containers in pikacloud API
@@ -110,7 +114,20 @@ func (agent *Agent) dockerCreate(opts *DockerCreateOpts) (*docker_types_containe
 		Image: opts.Image,
 		Env:   opts.Env,
 	}
-	hostConfig := &docker_types_container.HostConfig{}
+	natPortmap := docker_nat.PortMap{}
+	for _, p := range opts.Ports {
+		containerPortProto := docker_nat.Port(fmt.Sprintf("%d/%s", p.ContainerPort, p.Protocol))
+		dockerHostConfig := docker_nat.PortBinding{
+			HostIP:   p.HostIP,
+			HostPort: strconv.Itoa(p.HostPort),
+		}
+		natPortmap[containerPortProto] = append(natPortmap[containerPortProto], dockerHostConfig)
+	}
+	hostConfig := &docker_types_container.HostConfig{
+		Binds:           opts.Binds,
+		PublishAllPorts: opts.PublishAll,
+		PortBindings:    natPortmap,
+	}
 	networkingConfig := &docker_types_network.NetworkingConfig{}
 
 	container, err := agent.DockerClient.ContainerCreate(ctx, config, hostConfig, networkingConfig, opts.Name)
