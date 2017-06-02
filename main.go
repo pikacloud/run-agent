@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	docker_client "github.com/docker/docker/client"
+	docker_client "github.com/moby/moby/client"
 )
 
 const (
