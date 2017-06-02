@@ -19,8 +19,17 @@ const (
 )
 
 var (
-	agent *Agent
+	agent            *Agent
+	runningTasksList []string
 )
+
+func deleteRunningTasks(tid string) {
+	for idx, t := range runningTasksList {
+		if t == tid {
+			runningTasksList = runningTasksList[:idx+copy(runningTasksList[idx:], runningTasksList[idx+1:])]
+		}
+	}
+}
 
 // Agent describes the agent
 type Agent struct {
@@ -72,6 +81,13 @@ func (step *TaskStep) Do() error {
 	default:
 		return fmt.Errorf("Unknown step plugin %s", step.Plugin)
 	}
+}
+
+func pluralize(n int) string {
+	if n == 0 || n > 1 {
+		return "s"
+	}
+	return ""
 }
 
 // Docker runs a docker step
@@ -221,22 +237,24 @@ func (agent *Agent) infinitePing() {
 			}
 
 		}
-		time.Sleep(3 * time.Second)
+		time.Sleep(1 * time.Second)
 	}
 }
 
 // Ping agent
 func (agent *Agent) Ping() error {
 	pingURI := fmt.Sprintf("run/agents/%s/ping/", agent.ID)
-	// for {
-	status, err := agent.Client.Post(pingURI, nil, nil)
+	opts := PingAgentOptions{
+		RunningTasks: runningTasksList,
+	}
+	status, err := agent.Client.Post(pingURI, opts, nil)
 	if err != nil {
 		return err
 	}
 	if status != 200 {
 		return fmt.Errorf("Ping to %s returns %d\n", pingURI, status)
 	}
-	log.Println("Ping OK")
+	log.Printf("Ping OK (%d running task%s)", len(runningTasksList), pluralize(len(runningTasksList)))
 	return nil
 }
 
@@ -250,6 +268,9 @@ func (agent *Agent) infinitePullTasks() {
 			log.Printf("Got %d new tasks", len(tasks))
 		}
 		for _, task := range tasks {
+			if task.NeedACK {
+				runningTasksList = append(runningTasksList, task.ID)
+			}
 			ackTask, err := task.Do()
 			if err != nil {
 				log.Printf("Unable to do task %s: %s", task.ID, err)
@@ -262,7 +283,7 @@ func (agent *Agent) infinitePullTasks() {
 				} else {
 					log.Printf("task %s ACKed", task.ID)
 				}
-
+				deleteRunningTasks(task.ID)
 			}
 		}
 		time.Sleep(3 * time.Second)
