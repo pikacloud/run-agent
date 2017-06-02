@@ -29,15 +29,18 @@ type DockerPorts struct {
 
 // DockerCreateOpts describes docker run options
 type DockerCreateOpts struct {
-	Name       string         `json:"name"`
-	Image      string         `json:"image"`
-	Remove     bool           `json:"rm"`
-	Ports      []*DockerPorts `json:"ports"`
-	PublishAll bool           `json:"publish_all"`
-	Command    string         `json:"command"`
-	Entrypoint string         `json:"entrypoint"`
-	Env        []string       `json:"env"`
-	Binds      []string       `json:"binds"`
+	Name       string            `json:"name"`
+	Image      string            `json:"image"`
+	Remove     bool              `json:"rm"`
+	Ports      []*DockerPorts    `json:"ports"`
+	PublishAll bool              `json:"publish_all"`
+	Command    string            `json:"command"`
+	Entrypoint string            `json:"entrypoint"`
+	Env        []string          `json:"env"`
+	Binds      []string          `json:"binds"`
+	User       string            `json:"user"`
+	WorkingDir string            `json:"working_dir"`
+	Labels     map[string]string `json:"labels"`
 }
 
 // DockerPingOpts describes the structure to ping docker containers in pikacloud API
@@ -113,8 +116,15 @@ func (agent *Agent) dockerPull(opts *DockerPullOpts) error {
 func (agent *Agent) dockerCreate(opts *DockerCreateOpts) (*docker_types_container.ContainerCreateCreatedBody, error) {
 	ctx := context.Background()
 	config := &docker_types_container.Config{
-		Image: opts.Image,
-		Env:   opts.Env,
+		Image:  opts.Image,
+		Env:    opts.Env,
+		Labels: opts.Labels,
+	}
+	if opts.User != "" {
+		config.User = opts.User
+	}
+	if opts.WorkingDir != "" {
+		config.WorkingDir = opts.WorkingDir
 	}
 	if opts.Entrypoint != "" {
 		config.Entrypoint = strslice.StrSlice{opts.Entrypoint}
