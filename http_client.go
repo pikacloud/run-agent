@@ -115,15 +115,6 @@ func (client *Client) Get(path string, val interface{}) error {
 	return nil
 }
 
-// // Delete method
-// func (client *Client) Delete(path string, val interface{}) error {
-// 	_, _, err := client.sendRequest("DELETE", path, nil)
-// 	if err != nil {
-// 		return err
-// 	}
-// 	return nil
-// }
-
 // PostOrPutOrDelete method
 func (client *Client) PostOrPutOrDelete(method, path string, payload, val interface{}) (int, error) {
 	jsonPayload, err := json.Marshal(payload)
@@ -155,5 +146,5 @@ func (client *Client) Post(path string, payload, val interface{}) (int, error) {
 
 // Delete meta method
 func (client *Client) Delete(path string, payload, val interface{}) (int, error) {
-	return client.PostOrPutOrDelete("Delete", path, payload, val)
+	return client.PostOrPutOrDelete("DELETE", path, payload, val)
 }
