@@ -73,6 +73,11 @@ type DockerStartOpts struct {
 	ID string `json:"id"`
 }
 
+// DockerRestartOpts describes docker restart options
+type DockerRestartOpts struct {
+	ID string `json:"id"`
+}
+
 // DockerRemoveOpts describes docker remove options
 type DockerRemoveOpts struct {
 	ID            string `json:"id"`
@@ -190,6 +195,15 @@ func (agent *Agent) dockerStop(containerID string, timeout time.Duration) error 
 		return err
 	}
 	log.Printf("Container %s stopped", containerID)
+	return nil
+}
+
+func (agent *Agent) dockerRestart(containerID string, timeout time.Duration) error {
+	ctx := context.Background()
+	if err := agent.DockerClient.ContainerRestart(ctx, containerID, &timeout); err != nil {
+		return err
+	}
+	log.Printf("Container %s restarted", containerID)
 	return nil
 }
 
@@ -445,6 +459,17 @@ func (step *TaskStep) Docker() error {
 			return fmt.Errorf("Bad config for docker unpause: %s (%v)", err, step.PluginConfig)
 		}
 		err = agent.dockerStop(stopOpts.ID, 10*time.Second)
+		if err != nil {
+			return err
+		}
+		return nil
+	case "restart":
+		var restartOpts = DockerRestartOpts{}
+		err := json.Unmarshal([]byte(step.PluginConfig), &restartOpts)
+		if err != nil {
+			return fmt.Errorf("Bad config for docker restart: %s (%v)", err, step.PluginConfig)
+		}
+		err = agent.dockerRestart(restartOpts.ID, 10*time.Second)
 		if err != nil {
 			return err
 		}
