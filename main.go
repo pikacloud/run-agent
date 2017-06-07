@@ -84,7 +84,7 @@ func main() {
 
 	err = agent.Create(&newAgentOpts)
 	if err != nil {
-		log.Fatal(err)
+		log.Fatalf("Unable to register agent: %s", err.Error())
 	}
 	agent.syncDockerContainers(syncDockerContainersOptions{})
 	wg := sync.WaitGroup{}

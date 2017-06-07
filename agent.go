@@ -40,7 +40,7 @@ func makeLabels(labels string) []string {
 func (agent *Agent) Create(opt *CreateAgentOptions) error {
 	status, err := agent.Client.Post("run/agents/", opt, &agent)
 	if err != nil {
-		return fmt.Errorf(err.Error())
+		return err
 	}
 	if status != 200 {
 		return fmt.Errorf("Failed to create agent http code: %d", status)
