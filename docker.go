@@ -7,9 +7,16 @@ import (
 	"io"
 	"io/ioutil"
 	"log"
+	"net/url"
+	"os"
+	"os/exec"
 	"reflect"
 	"strconv"
+	"syscall"
 	"time"
+	"unsafe"
+
+	"github.com/kr/pty"
 
 	docker_types "github.com/docker/docker/api/types"
 	docker_types_container "github.com/docker/docker/api/types/container"
@@ -17,6 +24,7 @@ import (
 	docker_types_network "github.com/docker/docker/api/types/network"
 	"github.com/docker/docker/api/types/strslice"
 	docker_nat "github.com/docker/go-connections/nat"
+	"github.com/gorilla/websocket"
 )
 
 // DockerPorts describes docker ports for docker run
@@ -84,6 +92,23 @@ type DockerRemoveOpts struct {
 	Force         bool   `json:"force"`
 	RemoveLinks   bool   `json:"remove_links"`
 	RemoveVolumes bool   `json:"remove_volumes"`
+}
+
+// DockerTerminalOpts describes docker terminal options
+type DockerTerminalOpts struct {
+	ID   string `json:"id"`
+	Task *Task
+}
+
+var (
+	runningTerminalsList map[*DockerTerminalOpts]bool
+)
+
+type windowSize struct {
+	Rows uint16 `json:"rows"`
+	Cols uint16 `json:"cols"`
+	X    uint16
+	Y    uint16
 }
 
 // AgentDockerInfo describes docker info
@@ -219,6 +244,153 @@ func (agent *Agent) dockerRemove(containerID string, opts *DockerRemoveOpts) err
 	}
 	log.Printf("Container %s remove", containerID)
 	return nil
+}
+
+func (agent *Agent) dockerTerminal(opts *DockerTerminalOpts) error {
+	// connect to websocket /aid/cid/tid
+	addr := "localhost:8080"
+	path := fmt.Sprintf("/_ws/agent/%s/%s/%s/", agent.ID, opts.ID, opts.Task.ID)
+	u := url.URL{Scheme: "ws", Host: addr, Path: path}
+	log.Printf("connecting to %s", u.String())
+
+	dialer := websocket.DefaultDialer
+	dialer.HandshakeTimeout = 3 * time.Second
+	c, _, err := dialer.Dial(u.String(), nil)
+	if err != nil {
+		return fmt.Errorf("dial:%s", err)
+	}
+	cmd := exec.Command("docker", "exec", "-it", opts.ID, "bash")
+	// cmd := exec.Command("htop")
+	cmd.Env = append(os.Environ(), "TERM=xterm")
+	tty, err := pty.Start(cmd)
+	if err != nil {
+		c.WriteMessage(websocket.TextMessage, []byte(err.Error()))
+		return fmt.Errorf("Unable to start pty/cmd %+v", err)
+	}
+	runningTerminalsList[opts] = true
+	defer func() {
+
+		log.Printf("Garbage collecting Terminal %s", opts.Task.ID)
+		cmd.Process.Kill()
+		cmd.Process.Wait()
+		log.Printf("Terminal command killed %s", opts.Task.ID)
+		tty.Close()
+		log.Printf("TTY closed %s", opts.Task.ID)
+		c.Close()
+		log.Printf("Websocket connection closed %s", opts.Task.ID)
+		delete(runningTerminalsList, opts)
+		return
+
+	}()
+	quit := make(chan bool, 1000)
+
+	go func() {
+		for {
+
+			buf := make([]byte, 1024)
+			read, _ := tty.Read(buf)
+			if err != nil {
+				c.WriteMessage(websocket.TextMessage, []byte(err.Error()))
+				quit <- true
+				fmt.Printf("Unable to read from pty/cmd")
+				return
+			}
+			select {
+			case q := <-quit:
+				fmt.Printf("Got quit in channel from writer goroutine %+v", q)
+			default:
+				c.WriteMessage(websocket.BinaryMessage, []byte(buf[:read]))
+			}
+		}
+	}()
+
+	for {
+		q := <-quit
+		fmt.Println("pass")
+		if q {
+			fmt.Println("Got quit in channel from tty reader goroutine")
+			return nil
+		}
+		messageType, reader, err := c.NextReader()
+		if err != nil {
+			log.Println("Unable to grab next reader")
+			// quit <- true
+			return nil
+		}
+
+		if messageType == websocket.TextMessage {
+			log.Println("Unexpected text message")
+			c.WriteMessage(websocket.TextMessage, []byte("Unexpected text message"))
+			// quit <- true
+			continue
+		}
+		dataTypeBuf := make([]byte, 1)
+		read, err := reader.Read(dataTypeBuf)
+		if err != nil {
+			log.Printf("Unable to read message type from reader %+v", err)
+			c.WriteMessage(websocket.TextMessage, []byte("Unable to read message type from reader"))
+			// quit <- true
+			return nil
+		}
+
+		if read != 1 {
+			log.Printf("Unexpected number of bytes read %+v", read)
+			// quit <- true
+			return nil
+		}
+
+		switch dataTypeBuf[0] {
+		case 0:
+			copied, err := io.Copy(tty, reader)
+			if err != nil {
+				log.Printf("Error after copying %d bytes %+v", copied, err)
+			}
+		case 1:
+			decoder := json.NewDecoder(reader)
+			resizeMessage := windowSize{}
+			err := decoder.Decode(&resizeMessage)
+			if err != nil {
+				c.WriteMessage(websocket.TextMessage, []byte("Error decoding resize message: "+err.Error()))
+				continue
+			}
+			log.Printf("Resizing terminal %+v", resizeMessage)
+			_, _, errno := syscall.Syscall(
+				syscall.SYS_IOCTL,
+				tty.Fd(),
+				syscall.TIOCSWINSZ,
+				uintptr(unsafe.Pointer(&resizeMessage)),
+			)
+			if errno != 0 {
+				log.Printf("Unable to resize terminal %+v", errno)
+			}
+		default:
+			log.Printf("Unknown data type %+v", dataTypeBuf)
+		}
+	}
+	// for {
+	// 	buf := make([]byte, 1024)
+	// 	read, _ := tty.Read(buf)
+	// 	if err != nil {
+	// 		c.WriteMessage(websocket.TextMessage, []byte(err.Error()))
+	// 		fmt.Printf("Unable to read from pty/cmd")
+	// 		return nil
+	// 	}
+	// 	c.WriteMessage(websocket.BinaryMessage, []byte(buf[:read]))
+	// }
+
+	// }()
+	// ping terminal endpoint
+	//
+	// for {
+	//
+	// 	time.Sleep(3 * time.Second)
+	// }
+	// ctx := context.Background()
+	// if err := agent.DockerClient.ContainerRestart(ctx, containerID, &timeout); err != nil {
+	// 	return err
+	// }
+	// log.Printf("Container %s restarted", containerID)
+	// return nil
 }
 
 func (agent *Agent) infiniteSyncDockerInfo() {
@@ -481,6 +653,17 @@ func (step *TaskStep) Docker() error {
 			return fmt.Errorf("Bad config for docker remove: %s (%v)", err, step.PluginConfig)
 		}
 		err = agent.dockerRemove(removeOpts.ID, &removeOpts)
+		if err != nil {
+			return err
+		}
+		return nil
+	case "terminal":
+		var terminalOpts = DockerTerminalOpts{Task: step.Task}
+		err := json.Unmarshal([]byte(step.PluginConfig), &terminalOpts)
+		if err != nil {
+			return fmt.Errorf("Bad config for docker terminal: %s (%v)", err, step.PluginConfig)
+		}
+		err = agent.dockerTerminal(&terminalOpts)
 		if err != nil {
 			return err
 		}

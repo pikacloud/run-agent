@@ -13,6 +13,7 @@ type TaskStep struct {
 	Method            string          `json:"method"`
 	ExitOnFailure     bool            `json:"exit_on_failure"`
 	WaitForCompletion bool            `json:"wait_for_completion"`
+	Task              *Task
 }
 
 // Task descibres a task
@@ -48,6 +49,7 @@ func (task *Task) Do() (TaskACK, error) {
 	ack := TaskACK{}
 	for _, step := range task.Steps {
 		ackStep := TaskACKStep{}
+		step.Task = task
 		err := step.Do()
 		if err != nil {
 			log.Printf("%s Step %s failed with config %s (%s)", step.Plugin, step.Method, step.PluginConfig, err)

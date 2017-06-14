@@ -2,9 +2,13 @@ package main
 
 import (
 	"context"
+	"flag"
 	"log"
 	"os"
+	"os/signal"
+	"runtime/pprof"
 	"sync"
+	"syscall"
 
 	docker_client "github.com/moby/moby/client"
 )
@@ -18,6 +22,7 @@ const (
 var (
 	agent            *Agent
 	runningTasksList []string
+	cpuprofile       = flag.String("cpuprofile", "", "write cpu profile to file")
 )
 
 func deleteRunningTasks(tid string) {
@@ -40,10 +45,29 @@ func pluralize(n int) string {
 }
 
 func main() {
+	killchan := make(chan os.Signal, 2)
+	signal.Notify(killchan, syscall.SIGINT, syscall.SIGTERM)
+	flag.Parse()
+	if *cpuprofile != "" {
+		f, err := os.Create(*cpuprofile)
+		if err != nil {
+			log.Fatal(err)
+		}
+		if err := pprof.StartCPUProfile(f); err != nil {
+			log.Fatal("could not start CPU profile: ", err)
+		}
+		log.Println("Starting CPU profiler")
+		defer func() {
+			log.Println("Stopping CPU profiler")
+			pprof.StopCPUProfile()
+		}()
+	}
+	runningTerminalsList = make(map[*DockerTerminalOpts]bool)
 	apiToken := os.Getenv("PIKACLOUD_API_TOKEN")
 	baseURL := os.Getenv("PIKACLOUD_AGENT_URL")
 	hostname := os.Getenv("PIKACLOUD_AGENT_HOSTNAME")
 	labels := os.Getenv("PIKACLOUD_AGENT_LABELS")
+
 	if apiToken == "" {
 		log.Fatalln("PIKACLOUD_API_TOKEN is empty")
 	}
@@ -88,7 +112,10 @@ func main() {
 	}
 	agent.syncDockerContainers(syncDockerContainersOptions{})
 	wg := sync.WaitGroup{}
-	defer wg.Wait()
+	defer func() {
+		wg.Wait()
+		pprof.StopCPUProfile()
+	}()
 	wg.Add(1)
 	go agent.infiniteSyncDockerInfo()
 	wg.Add(1)
@@ -97,4 +124,7 @@ func main() {
 	go agent.listenDockerEvents()
 	wg.Add(1)
 	go agent.infinitePullTasks()
+	<-killchan
+	pprof.StopCPUProfile()
+	os.Exit(0)
 }

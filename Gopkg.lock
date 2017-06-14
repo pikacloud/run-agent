@@ -38,6 +38,18 @@
   version = "v0.3.1"
 
 [[projects]]
+  name = "github.com/gorilla/websocket"
+  packages = ["."]
+  revision = "3ab3a8b8831546bd18fd182c20687ca853b2bb13"
+  version = "v1.1.0"
+
+[[projects]]
+  name = "github.com/kr/pty"
+  packages = ["."]
+  revision = "2c10821df3c3cf905230d078702dfbe9404c9b23"
+  version = "v1.0.0"
+
+[[projects]]
   name = "github.com/moby/moby"
   packages = ["client"]
   revision = "092cba3727bb9b4a2f0e922cd6c0f93ea270e363"
@@ -64,6 +76,6 @@
 [solve-meta]
   analyzer-name = "dep"
   analyzer-version = 1
-  inputs-digest = "2407c39ef962bc2606967cd8c31089a7d4fd3c83752e43c02c3cdca867318acc"
+  inputs-digest = "bceef730e863b62ffca9e40e8fc9795fc69b504a6262f68917142b5aecf2a45a"
   solver-name = "gps-cdcl"
   solver-version = 1
