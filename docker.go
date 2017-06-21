@@ -8,15 +8,9 @@ import (
 	"io/ioutil"
 	"log"
 	"net/url"
-	"os"
-	"os/exec"
 	"reflect"
 	"strconv"
-	"syscall"
 	"time"
-	"unsafe"
-
-	"github.com/kr/pty"
 
 	docker_types "github.com/docker/docker/api/types"
 	docker_types_container "github.com/docker/docker/api/types/container"
@@ -105,8 +99,8 @@ var (
 )
 
 type windowSize struct {
-	Rows uint16 `json:"rows"`
-	Cols uint16 `json:"cols"`
+	Rows uint `json:"rows"`
+	Cols uint `json:"cols"`
 	X    uint16
 	Y    uint16
 }
@@ -259,115 +253,287 @@ func (agent *Agent) dockerTerminal(opts *DockerTerminalOpts) error {
 	if err != nil {
 		return fmt.Errorf("dial:%s", err)
 	}
-	cmd := exec.Command("docker", "exec", "-it", opts.ID, "bash")
-	// cmd := exec.Command("htop")
-	cmd.Env = append(os.Environ(), "TERM=xterm")
-	tty, err := pty.Start(cmd)
-	if err != nil {
-		c.WriteMessage(websocket.TextMessage, []byte(err.Error()))
-		return fmt.Errorf("Unable to start pty/cmd %+v", err)
+	ctx := context.Background()
+	config := docker_types.ExecConfig{
+		Tty:          true,
+		AttachStdin:  true,
+		AttachStderr: true,
+		AttachStdout: true,
+		// Detach:       false,
+		Env: []string{"TERM=xterm"},
+		Cmd: []string{"bash"},
 	}
+	execCreateResponse, err := agent.DockerClient.ContainerExecCreate(ctx, opts.ID, config)
+	if err != nil {
+		return err
+	}
+	execAttachResponse, err := agent.DockerClient.ContainerExecAttach(ctx, execCreateResponse.ID, config)
+	if err != nil {
+		return err
+	}
+	// defer execAttachResponse.Close()
+	// stdIn, stdOut, _ := term.StdStreams()
+	// stdInFD, _ := term.GetFdInfo(stdIn)
+	// stdOutFD, _ := term.GetFdInfo(stdOut)
+	//
+	// oldInState, _ := term.SetRawTerminal(stdInFD)
+	// oldOutState, _ := term.SetRawTerminalOutput(stdOutFD)
+	//
+	// defer term.RestoreTerminal(stdInFD, oldInState)
+	// defer term.RestoreTerminal(stdOutFD, oldOutState)
+
+	// var stdin io.Writer
+	// r, w := io.Pipe()
+	// defer w.Close()
+	// var stdout io.Writer
+	// var stderr io.Writer
+
+	// var buff bytes.Buffer
+	// // if stderr == nil {
+	// // 	stderr = &buff
+	// // }
+	// go func() error {
+	// 	if err := execPipe(execAttachResponse, nil, w, w); err != nil {
+	// 		return err
+	// 	}
+	// go func() error {
+	// 	for {
+	//
+	// 		fmt.Println(data)
+	// 	}
+	// }()
+	// 	data, err := agent.DockerClient.ContainerExecInspect(ctx, execCreateResponse.ID)
+	// 	if err != nil {
+	// 		return err
+	// 	}
+	// 	if data.ExitCode != 0 {
+	// 		// if so use the buffer that may have been assigned to the
+	// 		// streams to give message better error handling
+	// 		return fmt.Errorf("bad exit code(%d): %s", data.ExitCode, buff.String())
+	// 	}
+	// 	return nil
+	// }()
+	//
+	// fmt.Println("no wait")
+	// // cmd := exec.Command("docker", "exec", "-it", opts.ID, "bash")
+	// // // cmd := exec.Command("htop")
+	// // cmd.Env = append(os.Environ(), "TERM=xterm")
+	// // tty, err := pty.Start(cmd)
+	// // if err != nil {
+	// // 	c.WriteMessage(websocket.TextMessage, []byte(err.Error()))
+	// // 	return fmt.Errorf("Unable to start pty/cmd %+v", err)
+	// // }
 	runningTerminalsList[opts] = true
 	defer func() {
 
-		log.Printf("Garbage collecting Terminal %s", opts.Task.ID)
-		cmd.Process.Kill()
-		cmd.Process.Wait()
-		log.Printf("Terminal command killed %s", opts.Task.ID)
-		tty.Close()
-		log.Printf("TTY closed %s", opts.Task.ID)
-		c.Close()
-		log.Printf("Websocket connection closed %s", opts.Task.ID)
+		// log.Printf("Garbage collecting Terminal %s", opts.Task.ID)
+		// cmd.Process.Kill()
+		// cmd.Process.Wait()
+		// log.Printf("Terminal command killed %s", opts.Task.ID)
+		// tty.Close()
+		// log.Printf("TTY closed %s", opts.Task.ID)
+		// c.Close()
+		// log.Printf("Websocket connection closed %s", opts.Task.ID)
 		delete(runningTerminalsList, opts)
 		return
 
 	}()
-	quit := make(chan bool, 1000)
+	// quit := false
+	//go io.Copy(execAttachResponse.Conn, execAttachResponse.Conn.)
+	go func() {
+		defer func() {
+			log.Println("defer in reader")
+			c.Close()
+			execAttachResponse.CloseWrite()
+		}()
+		for {
+			messageType, reader, errReader := c.NextReader()
+			if errReader != nil {
+				log.Println("Unable to grab next reader")
+				return
+			}
+			if messageType == websocket.TextMessage {
+				log.Println("Unexpected text message")
+				c.WriteMessage(websocket.TextMessage, []byte("Unexpected text message"))
+				continue
+			}
+			dataTypeBuf := make([]byte, 1)
+			read, errR := reader.Read(dataTypeBuf)
+			if errR != nil {
+				log.Printf("Unable to read message type from reader %+v", errR)
+				c.WriteMessage(websocket.TextMessage, []byte("Unable to read message type from reader"))
+				return
+			}
 
+			if read != 1 {
+				log.Printf("Unexpected number of bytes read %+v", read)
+				return
+			}
+
+			switch dataTypeBuf[0] {
+			case 0:
+				copied, errCopy := io.Copy(execAttachResponse.Conn, reader)
+				if errCopy != nil {
+					log.Printf("Error after copying %d bytes %+v", copied, errCopy)
+				}
+			case 1:
+				decoder := json.NewDecoder(reader)
+				resizeMessage := windowSize{}
+				errResizeMessage := decoder.Decode(&resizeMessage)
+				if errResizeMessage != nil {
+					c.WriteMessage(websocket.TextMessage, []byte("Error decoding resize message: "+errResizeMessage.Error()))
+					continue
+				}
+				log.Printf("Resizing terminal %+v", resizeMessage)
+				errResize := agent.ContainerExecResize(execCreateResponse.ID, resizeMessage.Cols, resizeMessage.Rows)
+				if err != nil {
+					log.Printf("Unable to resize terminal %+v", errResize)
+				}
+				// _, _, errno := syscall.Syscall(
+				// 	syscall.SYS_IOCTL,
+				// 	// tty.Fd(),
+				// 	syscall.TIOCSWINSZ,
+				// 	uintptr(unsafe.Pointer(&resizeMessage)),
+				// )
+				// if errno != 0 {
+				// 	log.Printf("Unable to resize terminal %+v", errno)
+				// }
+			default:
+				log.Printf("Unknown data type %+v", dataTypeBuf)
+			}
+			// if err != nil {
+			// 	log.Println("Error reading message from WS", err)
+			// 	return
+			// }
+			//
+			// _, err = execAttachResponse.Conn.Write(message)
+			// if err != nil {
+			// 	log.Println("Error writing message to container", err)
+			// 	return
+			// }
+
+		}
+	}()
 	go func() {
 		for {
-
 			buf := make([]byte, 1024)
-			read, _ := tty.Read(buf)
+			read, _ := execAttachResponse.Conn.Read(buf)
 			if err != nil {
 				c.WriteMessage(websocket.TextMessage, []byte(err.Error()))
-				quit <- true
 				fmt.Printf("Unable to read from pty/cmd")
 				return
 			}
-			select {
-			case q := <-quit:
-				fmt.Printf("Got quit in channel from writer goroutine %+v", q)
-			default:
-				c.WriteMessage(websocket.BinaryMessage, []byte(buf[:read]))
-			}
+			c.WriteMessage(websocket.BinaryMessage, []byte(buf[:read]))
 		}
 	}()
-
 	for {
-		q := <-quit
-		fmt.Println("pass")
-		if q {
-			fmt.Println("Got quit in channel from tty reader goroutine")
-			return nil
+		data, errD := agent.DockerClient.ContainerExecInspect(ctx, execCreateResponse.ID)
+		if errD != nil {
+			return errD
 		}
-		messageType, reader, err := c.NextReader()
-		if err != nil {
-			log.Println("Unable to grab next reader")
-			// quit <- true
-			return nil
-		}
-
-		if messageType == websocket.TextMessage {
-			log.Println("Unexpected text message")
-			c.WriteMessage(websocket.TextMessage, []byte("Unexpected text message"))
-			// quit <- true
-			continue
-		}
-		dataTypeBuf := make([]byte, 1)
-		read, err := reader.Read(dataTypeBuf)
-		if err != nil {
-			log.Printf("Unable to read message type from reader %+v", err)
-			c.WriteMessage(websocket.TextMessage, []byte("Unable to read message type from reader"))
-			// quit <- true
-			return nil
-		}
-
-		if read != 1 {
-			log.Printf("Unexpected number of bytes read %+v", read)
-			// quit <- true
-			return nil
-		}
-
-		switch dataTypeBuf[0] {
-		case 0:
-			copied, err := io.Copy(tty, reader)
-			if err != nil {
-				log.Printf("Error after copying %d bytes %+v", copied, err)
-			}
-		case 1:
-			decoder := json.NewDecoder(reader)
-			resizeMessage := windowSize{}
-			err := decoder.Decode(&resizeMessage)
-			if err != nil {
-				c.WriteMessage(websocket.TextMessage, []byte("Error decoding resize message: "+err.Error()))
-				continue
-			}
-			log.Printf("Resizing terminal %+v", resizeMessage)
-			_, _, errno := syscall.Syscall(
-				syscall.SYS_IOCTL,
-				tty.Fd(),
-				syscall.TIOCSWINSZ,
-				uintptr(unsafe.Pointer(&resizeMessage)),
-			)
-			if errno != 0 {
-				log.Printf("Unable to resize terminal %+v", errno)
-			}
-		default:
-			log.Printf("Unknown data type %+v", dataTypeBuf)
+		if !data.Running {
+			return fmt.Errorf("bad exit code(%d)", data.ExitCode)
 		}
 	}
+	// wr := WSReaderWriter{c}
+	// io.Copy(wr)
+	// // go func() {
 	// for {
+	// 	if quit {
+	// 		return nil
+	// 	}
+	//
+	// 	// fmt.Println(stdout)
+	// 	buf := new(bytes.Buffer)
+	// 	buf.ReadFrom(r)
+	// 	s := buf.String()
+	// 	if s != "" {
+	// 		fmt.Println("----", s)
+	// 	}
+	// 	// buf := make([]byte, 1024)
+	// 	// // io.Copy(os.Stdout, r)
+	// 	// read, _ := r.Read(buf)
+	// 	// fmt.Println(buf, read)
+	// 	// if err != nil {
+	// 	// 	c.WriteMessage(websocket.TextMessage, []byte(err.Error()))
+	// 	// 	quit = true
+	// 	// 	fmt.Printf("Unable to read from pty/cmd")
+	// 	// 	return
+	// 	// }
+	// 	// c.WriteMessage(websocket.BinaryMessage, []byte(buf[:read]))
+	// 	// c.WriteMessage(websocket.BinaryMessage, []byte(stdout))
+	//
+	// }
+	// }()
+
+	// for {
+	// 	if quit {
+	// 		return nil
+	// 	}
+	// 	// q := <-quit
+	// 	// fmt.Println("pass")
+	// 	// if q {
+	// 	// 	fmt.Println("Got quit in channel from tty reader goroutine")
+	// 	// 	return nil
+	// 	// }
+	// 	messageType, reader, err := c.NextReader()
+	// 	if err != nil {
+	// 		log.Println("Unable to grab next reader")
+	// 		quit = true
+	// 		log.Println("Sending true in quit")
+	// 		return nil
+	// 	}
+	//
+	// 	if messageType == websocket.TextMessage {
+	// 		log.Println("Unexpected text message")
+	// 		c.WriteMessage(websocket.TextMessage, []byte("Unexpected text message"))
+	// 		quit = true
+	// 		continue
+	// 	}
+	// 	dataTypeBuf := make([]byte, 1)
+	// 	read, err := reader.Read(dataTypeBuf)
+	// 	if err != nil {
+	// 		log.Printf("Unable to read message type from reader %+v", err)
+	// 		c.WriteMessage(websocket.TextMessage, []byte("Unable to read message type from reader"))
+	// 		quit = true
+	// 		return nil
+	// 	}
+	//
+	// 	if read != 1 {
+	// 		log.Printf("Unexpected number of bytes read %+v", read)
+	// 		quit = true
+	// 		return nil
+	// 	}
+	//
+	// 	switch dataTypeBuf[0] {
+	// 	case 0:
+	// 		copied, err := io.Copy(tty, reader)
+	// 		if err != nil {
+	// 			log.Printf("Error after copying %d bytes %+v", copied, err)
+	// 		}
+	// 	case 1:
+	// 		decoder := json.NewDecoder(reader)
+	// 		resizeMessage := windowSize{}
+	// 		err := decoder.Decode(&resizeMessage)
+	// 		if err != nil {
+	// 			c.WriteMessage(websocket.TextMessage, []byte("Error decoding resize message: "+err.Error()))
+	// 			continue
+	// 		}
+	// 		log.Printf("Resizing terminal %+v", resizeMessage)
+	// 		_, _, errno := syscall.Syscall(
+	// 			syscall.SYS_IOCTL,
+	// 			tty.Fd(),
+	// 			syscall.TIOCSWINSZ,
+	// 			uintptr(unsafe.Pointer(&resizeMessage)),
+	// 		)
+	// 		if errno != 0 {
+	// 			log.Printf("Unable to resize terminal %+v", errno)
+	// 		}
+	// 	default:
+	// 		log.Printf("Unknown data type %+v", dataTypeBuf)
+	// 	}
+	// }
+	// // for {
 	// 	buf := make([]byte, 1024)
 	// 	read, _ := tty.Read(buf)
 	// 	if err != nil {
@@ -390,6 +556,7 @@ func (agent *Agent) dockerTerminal(opts *DockerTerminalOpts) error {
 	// 	return err
 	// }
 	// log.Printf("Container %s restarted", containerID)
+	// return nil
 	// return nil
 }
 
