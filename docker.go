@@ -9,7 +9,9 @@ import (
 	"log"
 	"net/url"
 	"reflect"
+	"runtime"
 	"strconv"
+	"strings"
 	"time"
 
 	docker_types "github.com/docker/docker/api/types"
@@ -242,6 +244,7 @@ func (agent *Agent) dockerRemove(containerID string, opts *DockerRemoveOpts) err
 
 func (agent *Agent) dockerTerminal(opts *DockerTerminalOpts) error {
 	// connect to websocket /aid/cid/tid
+	quit := false
 	addr := "localhost:8080"
 	path := fmt.Sprintf("/_ws/agent/%s/%s/%s/", agent.ID, opts.ID, opts.Task.ID)
 	u := url.URL{Scheme: "ws", Host: addr, Path: path}
@@ -254,24 +257,39 @@ func (agent *Agent) dockerTerminal(opts *DockerTerminalOpts) error {
 		return fmt.Errorf("dial:%s", err)
 	}
 	ctx := context.Background()
-	config := docker_types.ExecConfig{
+	configExec := docker_types.ExecConfig{
 		Tty:          true,
 		AttachStdin:  true,
 		AttachStderr: true,
 		AttachStdout: true,
-		// Detach:       false,
-		Env: []string{"TERM=xterm"},
-		Cmd: []string{"bash"},
+		Detach:       false,
+		Env:          []string{"TERM=xterm"},
+		Cmd:          []string{"bash"},
 	}
-	execCreateResponse, err := agent.DockerClient.ContainerExecCreate(ctx, opts.ID, config)
+	// ctxWithTimeout, ctxCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	// defer ctxCancel()
+	execCreateResponse, err := agent.DockerClient.ContainerExecCreate(ctx, opts.ID, configExec)
 	if err != nil {
 		return err
 	}
-	execAttachResponse, err := agent.DockerClient.ContainerExecAttach(ctx, execCreateResponse.ID, config)
-	if err != nil {
-		return err
+	// configStart := docker_types.ExecStartCheck{
+	// 	Detach: configExec.Detach,
+	// 	Tty:    configExec.Tty,
+	// }
+
+	// go func() error {
+	// 	errStart := agent.DockerClient.ContainerExecStart(ctxWithTimeout, execCreateResponse.ID, configStart)
+	// 	if errStart != nil {
+	// 		return errStart
+	// 	}
+	// 	return nil
+	// }()
+
+	execAttachResponse, errAttach := agent.DockerClient.ContainerExecAttach(ctx, execCreateResponse.ID, configExec)
+	if errAttach != nil {
+		return errAttach
 	}
-	// defer execAttachResponse.Close()
+
 	// stdIn, stdOut, _ := term.StdStreams()
 	// stdInFD, _ := term.GetFdInfo(stdIn)
 	// stdOutFD, _ := term.GetFdInfo(stdOut)
@@ -325,6 +343,44 @@ func (agent *Agent) dockerTerminal(opts *DockerTerminalOpts) error {
 	// // }
 	runningTerminalsList[opts] = true
 	defer func() {
+		log.Println("Defer fx terminal")
+		data, errInspect := agent.DockerClient.ContainerExecInspect(ctx, execCreateResponse.ID)
+		if errInspect == nil {
+			if data.Running {
+				configKillExec := docker_types.ExecConfig{
+					Tty:          false,
+					AttachStdin:  false,
+					AttachStderr: false,
+					AttachStdout: false,
+					Detach:       false,
+					Env:          []string{"TERM=xterm"},
+				}
+				if strings.HasSuffix(runtime.GOOS, "darwin") {
+					// https://www.reddit.com/r/docker/comments/6d8yt3/killing_a_process_from_docker_exec_on_os_x/
+					// https://gist.github.com/bschwind/7ef38e2918c43bd7ee23d86dad86db7d
+					log.Println("we should kill the leaked process via xhyve tty")
+				} else {
+					configKillExec.Cmd = []string{"kill", "-9", fmt.Sprintf("%d", data.Pid)}
+					killCreateResponse, errKillCreate := agent.DockerClient.ContainerExecCreate(ctx, opts.ID, configKillExec)
+					if err == errKillCreate {
+						killStartResponse, errKillStart := agent.DockerClient.ContainerExecAttach(ctx, killCreateResponse.ID, configKillExec)
+						defer killStartResponse.Close()
+						if errKillStart == nil {
+							dataKill, errKillInspect := agent.DockerClient.ContainerExecInspect(ctx, execCreateResponse.ID)
+							if errKillInspect != nil {
+								log.Printf("Cannot kill leaked process %d", data.Pid)
+							} else {
+								if dataKill.ExitCode == 0 {
+									log.Printf("Successfully killed leaked process %d", data.Pid)
+								} else {
+									log.Printf("Cannot kill leaked process: 'kill -9 %d' exit code is %d'", data.Pid, dataKill.ExitCode)
+								}
+							}
+						}
+					}
+				}
+			}
+		}
 
 		// log.Printf("Garbage collecting Terminal %s", opts.Task.ID)
 		// cmd.Process.Kill()
@@ -332,8 +388,10 @@ func (agent *Agent) dockerTerminal(opts *DockerTerminalOpts) error {
 		// log.Printf("Terminal command killed %s", opts.Task.ID)
 		// tty.Close()
 		// log.Printf("TTY closed %s", opts.Task.ID)
-		// c.Close()
-		// log.Printf("Websocket connection closed %s", opts.Task.ID)
+		execAttachResponse.Close()
+		log.Printf("Exec session %s closed", execCreateResponse.ID)
+		c.Close()
+		log.Printf("Websocket connection closed %s", opts.Task.ID)
 		delete(runningTerminalsList, opts)
 		return
 
@@ -342,19 +400,22 @@ func (agent *Agent) dockerTerminal(opts *DockerTerminalOpts) error {
 	//go io.Copy(execAttachResponse.Conn, execAttachResponse.Conn.)
 	go func() {
 		defer func() {
-			log.Println("defer in reader")
-			c.Close()
-			execAttachResponse.CloseWrite()
+			quit = true
 		}()
 		for {
+			if quit {
+				return
+			}
 			messageType, reader, errReader := c.NextReader()
 			if errReader != nil {
 				log.Println("Unable to grab next reader")
+				quit = true
 				return
 			}
 			if messageType == websocket.TextMessage {
 				log.Println("Unexpected text message")
 				c.WriteMessage(websocket.TextMessage, []byte("Unexpected text message"))
+				quit = true
 				continue
 			}
 			dataTypeBuf := make([]byte, 1)
@@ -362,11 +423,13 @@ func (agent *Agent) dockerTerminal(opts *DockerTerminalOpts) error {
 			if errR != nil {
 				log.Printf("Unable to read message type from reader %+v", errR)
 				c.WriteMessage(websocket.TextMessage, []byte("Unable to read message type from reader"))
+				quit = true
 				return
 			}
 
 			if read != 1 {
 				log.Printf("Unexpected number of bytes read %+v", read)
+				quit = true
 				return
 			}
 
@@ -416,24 +479,35 @@ func (agent *Agent) dockerTerminal(opts *DockerTerminalOpts) error {
 	}()
 	go func() {
 		for {
+			if quit {
+				return
+			}
 			buf := make([]byte, 1024)
 			read, _ := execAttachResponse.Conn.Read(buf)
 			if err != nil {
 				c.WriteMessage(websocket.TextMessage, []byte(err.Error()))
 				fmt.Printf("Unable to read from pty/cmd")
+				quit = true
 				return
 			}
 			c.WriteMessage(websocket.BinaryMessage, []byte(buf[:read]))
 		}
 	}()
 	for {
+		if quit {
+			return nil
+		}
+		log.Println("UP")
 		data, errD := agent.DockerClient.ContainerExecInspect(ctx, execCreateResponse.ID)
 		if errD != nil {
+			quit = true
 			return errD
 		}
 		if !data.Running {
+			quit = true
 			return fmt.Errorf("bad exit code(%d)", data.ExitCode)
 		}
+		time.Sleep(1 * time.Second)
 	}
 	// wr := WSReaderWriter{c}
 	// io.Copy(wr)
