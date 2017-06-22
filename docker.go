@@ -8,6 +8,7 @@ import (
 	"io/ioutil"
 	"log"
 	"net/url"
+	"os/exec"
 	"reflect"
 	"runtime"
 	"strconv"
@@ -245,9 +246,11 @@ func (agent *Agent) dockerRemove(containerID string, opts *DockerRemoveOpts) err
 func (agent *Agent) dockerTerminal(opts *DockerTerminalOpts) error {
 	// connect to websocket /aid/cid/tid
 	quit := false
-	addr := "localhost:8080"
+	wsURLParams := strings.Split(wsURL, "://")
+	scheme := wsURLParams[0]
+	addr := wsURLParams[1]
 	path := fmt.Sprintf("/_ws/agent/%s/%s/%s/", agent.ID, opts.ID, opts.Task.ID)
-	u := url.URL{Scheme: "ws", Host: addr, Path: path}
+	u := url.URL{Scheme: scheme, Host: addr, Path: path}
 	log.Printf("connecting to %s", u.String())
 
 	dialer := websocket.DefaultDialer
@@ -347,37 +350,54 @@ func (agent *Agent) dockerTerminal(opts *DockerTerminalOpts) error {
 		data, errInspect := agent.DockerClient.ContainerExecInspect(ctx, execCreateResponse.ID)
 		if errInspect == nil {
 			if data.Running {
-				configKillExec := docker_types.ExecConfig{
-					Tty:          false,
-					AttachStdin:  false,
-					AttachStderr: false,
-					AttachStdout: false,
-					Detach:       false,
-					Env:          []string{"TERM=xterm"},
-				}
-				if strings.HasSuffix(runtime.GOOS, "darwin") {
+				// configKillExec := docker_types.ExecConfig{
+				// 	Tty:          false,
+				// 	AttachStdin:  false,
+				// 	AttachStderr: false,
+				// 	AttachStdout: false,
+				// 	Detach:       false,
+				// 	Env:          []string{"TERM=xterm"},
+				// }
+				if strings.HasSuffix(runtime.GOOS, "darwin") || isXhyve {
 					// https://www.reddit.com/r/docker/comments/6d8yt3/killing_a_process_from_docker_exec_on_os_x/
 					// https://gist.github.com/bschwind/7ef38e2918c43bd7ee23d86dad86db7d
-					log.Println("we should kill the leaked process via xhyve tty")
-				} else {
-					configKillExec.Cmd = []string{"kill", "-9", fmt.Sprintf("%d", data.Pid)}
-					killCreateResponse, errKillCreate := agent.DockerClient.ContainerExecCreate(ctx, opts.ID, configKillExec)
-					if err == errKillCreate {
-						killStartResponse, errKillStart := agent.DockerClient.ContainerExecAttach(ctx, killCreateResponse.ID, configKillExec)
-						defer killStartResponse.Close()
-						if errKillStart == nil {
-							dataKill, errKillInspect := agent.DockerClient.ContainerExecInspect(ctx, execCreateResponse.ID)
-							if errKillInspect != nil {
-								log.Printf("Cannot kill leaked process %d", data.Pid)
-							} else {
-								if dataKill.ExitCode == 0 {
-									log.Printf("Successfully killed leaked process %d", data.Pid)
-								} else {
-									log.Printf("Cannot kill leaked process: 'kill -9 %d' exit code is %d'", data.Pid, dataKill.ExitCode)
-								}
-							}
-						}
+					log.Println("Killing leaked process (darwin)")
+					command := fmt.Sprintf("echo kill -9 %d > %s", data.Pid, xhyveTTY)
+					cmd := exec.Command("/bin/sh", "-c", command)
+					errCommand := cmd.Run()
+					if errCommand != nil {
+						log.Printf("Failed to kill PID %d in the xhyve VM: %v", data.Pid, errCommand)
+					} else {
+						log.Printf("Killed leaked PID %d in the xhyve VM", data.Pid)
 					}
+				} else {
+					log.Println("Killing leaked process (unix)")
+					command := fmt.Sprintf("kill -9 %d", data.Pid)
+					cmd := exec.Command("/bin/sh", "-c", command)
+					errCommand := cmd.Run()
+					if errCommand != nil {
+						log.Printf("Failed to kill PID %d locally: %v", data.Pid, errCommand)
+					} else {
+						log.Printf("Leaked PID %d killed locally", data.Pid)
+					}
+					// configKillExec.Cmd = []string{"kill", "-9", fmt.Sprintf("%d", data.Pid)}
+					// killCreateResponse, errKillCreate := agent.DockerClient.ContainerExecCreate(ctx, opts.ID, configKillExec)
+					// if err == errKillCreate {
+					// 	killStartResponse, errKillStart := agent.DockerClient.ContainerExecAttach(ctx, killCreateResponse.ID, configKillExec)
+					// 	defer killStartResponse.Close()
+					// 	if errKillStart == nil {
+					// 		dataKill, errKillInspect := agent.DockerClient.ContainerExecInspect(ctx, execCreateResponse.ID)
+					// 		if errKillInspect != nil {
+					// 			log.Printf("Cannot kill leaked process %d", data.Pid)
+					// 		} else {
+					// 			if dataKill.ExitCode == 0 {
+					// 				log.Printf("Successfully killed leaked process %d", data.Pid)
+					// 			} else {
+					// 				log.Printf("Cannot kill leaked process: 'kill -9 %d' exit code is %d'", data.Pid, dataKill.ExitCode)
+					// 			}
+					// 		}
+					// 	}
+					//}
 				}
 			}
 		}

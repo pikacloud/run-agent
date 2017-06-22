@@ -23,6 +23,9 @@ var (
 	agent            *Agent
 	runningTasksList []string
 	cpuprofile       = flag.String("cpuprofile", "", "write cpu profile to file")
+	wsURL            = "ws.pikacloud.com"
+	isXhyve          = false
+	xhyveTTY         = "~/Library/Containers/com.docker.docker/Data/com.docker.driver.amd64-linux/tty"
 )
 
 func deleteRunningTasks(tid string) {
@@ -67,6 +70,18 @@ func main() {
 	baseURL := os.Getenv("PIKACLOUD_AGENT_URL")
 	hostname := os.Getenv("PIKACLOUD_AGENT_HOSTNAME")
 	labels := os.Getenv("PIKACLOUD_AGENT_LABELS")
+	wsURLenv := os.Getenv("PIKACLOUD_WS_URL")
+	isXhyvEnv := os.Getenv("PIKACLOUD_XHYVE")
+	xhyveTTYEnv := os.Getenv("PIKACLOUD_XHYVE_TTY")
+	if xhyveTTYEnv != "" {
+		xhyveTTY = xhyveTTYEnv
+	}
+	if isXhyvEnv != "" {
+		isXhyve = true
+	}
+	if wsURLenv != "" {
+		wsURL = wsURLenv
+	}
 
 	if apiToken == "" {
 		log.Fatalln("PIKACLOUD_API_TOKEN is empty")
