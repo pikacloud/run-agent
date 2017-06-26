@@ -56,7 +56,6 @@ func testRequestJSON(t *testing.T, r *http.Request, values map[string]interface{
 	if err := json.Unmarshal(body, &dat); err != nil {
 		t.Errorf("Could not decode json body: %v", err)
 	}
-
 	if !reflect.DeepEqual(values, dat) {
 		t.Errorf("Request parameters = %v, want %v", dat, values)
 	}

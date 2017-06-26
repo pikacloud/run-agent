@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"flag"
+	"fmt"
 	"log"
 	"os"
 	"os/signal"
@@ -20,12 +21,15 @@ const (
 )
 
 var (
-	agent            *Agent
-	runningTasksList []string
-	cpuprofile       = flag.String("cpuprofile", "", "write cpu profile to file")
-	wsURL            = "ws.pikacloud.com"
-	isXhyve          = false
-	xhyveTTY         = "~/Library/Containers/com.docker.docker/Data/com.docker.driver.amd64-linux/tty"
+	agent             *Agent
+	runningTasksList  []string
+	cpuprofile        = flag.String("cpuprofile", "", "write cpu profile to file")
+	showVersion       = flag.Bool("version", false, "show version")
+	showLatestVersion = flag.Bool("latest", false, "show latest version available")
+	wsURL             = "ws.pikacloud.com"
+	isXhyve           = false
+	xhyveTTY          = "~/Library/Containers/com.docker.docker/Data/com.docker.driver.amd64-linux/tty"
+	version           string
 )
 
 func deleteRunningTasks(tid string) {
@@ -51,6 +55,11 @@ func main() {
 	killchan := make(chan os.Signal, 2)
 	signal.Notify(killchan, syscall.SIGINT, syscall.SIGTERM)
 	flag.Parse()
+	_agent := Agent{}
+	if *showVersion {
+		fmt.Printf("Run-agent version %s", version)
+		os.Exit(0)
+	}
 	if *cpuprofile != "" {
 		f, err := os.Create(*cpuprofile)
 		if err != nil {
@@ -107,11 +116,10 @@ func main() {
 		panic(err)
 	}
 
-	_agent := Agent{
-		Client:       c,
-		Hostname:     hostname,
-		DockerClient: dockerClient,
-	}
+	_agent.Client = c
+	_agent.Hostname = hostname
+	_agent.DockerClient = dockerClient
+
 	agent = &_agent
 	newAgentOpts := CreateAgentOptions{
 		Hostname: hostname,

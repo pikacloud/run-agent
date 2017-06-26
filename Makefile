@@ -1,3 +1,5 @@
+VERSION := `cat VERSION`
+
 test: dep
 	go test -v
 
@@ -6,7 +8,7 @@ dep:
 	dep ensure -v
 
 build: dep test
-	go build -v
+	go build -v -ldflags "-X main.xyz=$(VERSION)"
 	go install
 
 latest:

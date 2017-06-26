@@ -19,25 +19,23 @@ func TestAgentCreate(t *testing.T) {
 	defer teardown()
 
 	mux.HandleFunc("/v1/run/agents/", func(w http.ResponseWriter, r *http.Request) {
-		want := make(map[string]interface{})
-		want = map[string]interface{}{"hostname": "tata"}
-
 		testMethod(t, r, "POST")
-		fmt.Fprint(w, `{"aid": "toto", "hostname": "tata"}`)
-
-		testRequestJSON(t, r, want)
-
+		fmt.Fprint(w, `{"aid": "toto", "hostname": "tata", "localtime": 42}`)
 	})
 
 	a := Agent{
 		Client: client,
 	}
 	newAgentOpts := CreateAgentOptions{
-		Hostname: "tata",
+		Hostname:  "tata",
+		Localtime: 42,
 	}
 	err := a.Create(&newAgentOpts)
 	if err != nil {
 		t.Errorf("Cannot create agent %+v", err)
+	}
+	if a.Localtime != 42 {
+		t.Errorf("Agent Localtime=%v, want %v", a.Localtime, 42)
 	}
 	if a.ID != "toto" {
 		t.Errorf("Agent ID=%v, want %v", a.ID, "toto")

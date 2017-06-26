@@ -14,14 +14,14 @@ import (
 type CreateAgentOptions struct {
 	Hostname  string   `json:"hostname"`
 	Labels    []string `json:"labels,omitempty"`
-	Localtime int32    `json:"localtime"`
+	Localtime int      `json:"localtime"`
 }
 
 // PingAgentOptions represents the agent Ping() options
 type PingAgentOptions struct {
 	RunningTasks     []string `json:"running_tasks,omitempty"`
 	RunningTerminals []string `json:"running_terminals,omitempty"`
-	Localtime        int32    `json:"localtime"`
+	Localtime        int      `json:"localtime"`
 }
 
 // Agent describes the agent
@@ -33,11 +33,11 @@ type Agent struct {
 	TTL          int      `json:"ttl"`
 	Hostname     string   `json:"hostname"`
 	Labels       []string `json:"labels"`
-	Localtime    int32    `json:"localtime"`
+	Localtime    int      `json:"localtime"`
 }
 
-func localtime() int32 {
-	return int32(time.Now().Unix())
+func localtime() int {
+	return int(time.Now().Unix())
 }
 
 func makeLabels(labels string) []string {
@@ -55,6 +55,11 @@ func (agent *Agent) Create(opt *CreateAgentOptions) error {
 	}
 	log.Printf("Agent %s registered with hostname %s\n", agent.ID, agent.Hostname)
 	return nil
+}
+
+// lastVersion checks the latest run-agent available
+func (agent *Agent) lastVersion() (string, error) {
+	return "", nil
 }
 
 func (agent *Agent) infinitePing() {
