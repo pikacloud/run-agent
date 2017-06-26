@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -14,6 +15,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/fernet/fernet-go"
 
 	docker_types "github.com/docker/docker/api/types"
 	docker_types_container "github.com/docker/docker/api/types/container"
@@ -35,7 +38,6 @@ type DockerPorts struct {
 // DockerCreateOpts describes docker run options
 type DockerCreateOpts struct {
 	Name       string            `json:"name"`
-	Image      string            `json:"image"`
 	Remove     bool              `json:"rm"`
 	Ports      []*DockerPorts    `json:"ports"`
 	PublishAll bool              `json:"publish_all"`
@@ -46,6 +48,7 @@ type DockerCreateOpts struct {
 	User       string            `json:"user"`
 	WorkingDir string            `json:"working_dir"`
 	Labels     map[string]string `json:"labels"`
+	PullOpts   *DockerPullOpts   `json:"pull_opts"`
 }
 
 // DockerPingOpts describes the structure to ping docker containers in pikacloud API
@@ -53,9 +56,25 @@ type DockerPingOpts struct {
 	Containers []string `json:"containers_id"`
 }
 
+// ExternalAuthPullOpts describes auth parametes for private docker pull
+type ExternalAuthPullOpts struct {
+	Login    string `json:"login"`
+	Password string `json:"password"`
+}
+
 // DockerPullOpts describes docker pull options
 type DockerPullOpts struct {
-	Image string `json:"image"`
+	Image        string                `json:"image"`
+	ExternalAuth *ExternalAuthPullOpts `json:"external_registry_auth"`
+}
+
+func (e *ExternalAuthPullOpts) registryAuthString(aid string) string {
+	key := base64.StdEncoding.EncodeToString([]byte(aid))
+	k := fernet.MustDecodeKeys(key)
+	password := fernet.VerifyAndDecrypt([]byte(e.Password), 60*time.Second, k)
+	data := []byte(fmt.Sprintf("{\"username\": \"%s\", \"password\": \"%s\"}", e.Login, string(password)))
+	str := base64.StdEncoding.EncodeToString(data)
+	return str
 }
 
 // DockerUnpauseOpts describes docker unpause options
@@ -128,6 +147,9 @@ func (agent *Agent) dockerPull(opts *DockerPullOpts) error {
 	log.Printf("Pulling %s", opts.Image)
 	ctx := context.Background()
 	pullOpts := docker_types.ImagePullOptions{}
+	if opts.ExternalAuth != nil {
+		pullOpts.RegistryAuth = opts.ExternalAuth.registryAuthString(agent.ID)
+	}
 	out, err := agent.DockerClient.ImagePull(ctx, opts.Image, pullOpts)
 	if err != nil {
 		return err
@@ -143,7 +165,7 @@ func (agent *Agent) dockerPull(opts *DockerPullOpts) error {
 func (agent *Agent) dockerCreate(opts *DockerCreateOpts) (*docker_types_container.ContainerCreateCreatedBody, error) {
 	ctx := context.Background()
 	config := &docker_types_container.Config{
-		Image:  opts.Image,
+		Image:  opts.PullOpts.Image,
 		Env:    opts.Env,
 		Labels: opts.Labels,
 	}
@@ -174,7 +196,6 @@ func (agent *Agent) dockerCreate(opts *DockerCreateOpts) (*docker_types_containe
 		PortBindings:    natPortmap,
 	}
 	networkingConfig := &docker_types_network.NetworkingConfig{}
-
 	container, err := agent.DockerClient.ContainerCreate(ctx, config, hostConfig, networkingConfig, opts.Name)
 	if err != nil {
 		return nil, err
@@ -826,10 +847,7 @@ func (step *TaskStep) Docker() error {
 		if err != nil {
 			return fmt.Errorf("Bad config for docker container run: %s (%v)", err, step.PluginConfig)
 		}
-		pullOpts := &DockerPullOpts{
-			Image: createOpts.Image,
-		}
-		err = agent.dockerPull(pullOpts)
+		err = agent.dockerPull(createOpts.PullOpts)
 		if err != nil {
 			return err
 		}

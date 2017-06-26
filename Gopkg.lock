@@ -38,6 +38,12 @@
   version = "v0.3.1"
 
 [[projects]]
+  branch = "master"
+  name = "github.com/fernet/fernet-go"
+  packages = ["."]
+  revision = "1b2437bc582b3cfbb341ee5a29f8ef5b42912ff2"
+
+[[projects]]
   name = "github.com/gorilla/websocket"
   packages = ["."]
   revision = "3ab3a8b8831546bd18fd182c20687ca853b2bb13"
@@ -70,6 +76,6 @@
 [solve-meta]
   analyzer-name = "dep"
   analyzer-version = 1
-  inputs-digest = "437487fcde81f8414c38d248851cb7520709cf5c547304738dc9a210b94a4842"
+  inputs-digest = "6968dda6ef4c8334e90e1d6fd10b827b099000c9f81cc498325e75ea8340abd0"
   solver-name = "gps-cdcl"
   solver-version = 1
