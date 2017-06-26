@@ -12,14 +12,16 @@ import (
 
 // CreateAgentOptions represents the agent Create() options
 type CreateAgentOptions struct {
-	Hostname string   `json:"hostname"`
-	Labels   []string `json:"labels,omitempty"`
+	Hostname  string   `json:"hostname"`
+	Labels    []string `json:"labels,omitempty"`
+	Localtime int32    `json:"localtime"`
 }
 
 // PingAgentOptions represents the agent Ping() options
 type PingAgentOptions struct {
 	RunningTasks     []string `json:"running_tasks,omitempty"`
 	RunningTerminals []string `json:"running_terminals,omitempty"`
+	Localtime        int32    `json:"localtime"`
 }
 
 // Agent describes the agent
@@ -31,6 +33,11 @@ type Agent struct {
 	TTL          int      `json:"ttl"`
 	Hostname     string   `json:"hostname"`
 	Labels       []string `json:"labels"`
+	Localtime    int32    `json:"localtime"`
+}
+
+func localtime() int32 {
+	return int32(time.Now().Unix())
 }
 
 func makeLabels(labels string) []string {
@@ -57,8 +64,9 @@ func (agent *Agent) infinitePing() {
 			log.Printf("Cannot ping %+v", err)
 			log.Println("Trying to register lost agent")
 			newAgentOpts := CreateAgentOptions{
-				Hostname: agent.Hostname,
-				Labels:   agent.Labels,
+				Hostname:  agent.Hostname,
+				Labels:    agent.Labels,
+				Localtime: localtime(),
 			}
 			agent.Create(&newAgentOpts)
 			agent.syncDockerContainers(syncDockerContainersOptions{})
@@ -79,6 +87,7 @@ func (agent *Agent) Ping() error {
 	pingURI := fmt.Sprintf("run/agents/%s/ping/", agent.ID)
 	opts := PingAgentOptions{
 		RunningTasks: runningTasksList,
+		Localtime:    localtime(),
 	}
 	for t := range runningTerminalsList {
 		opts.RunningTerminals = append(opts.RunningTerminals, t.Task.ID)
