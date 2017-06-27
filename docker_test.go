@@ -38,12 +38,16 @@ func TestDockerContainer(t *testing.T) {
 		Name:   "foobar",
 		Remove: true,
 		PullOpts: &DockerPullOpts{
-			Image: "nginx",
+			Image: "nginx:latest",
 		},
+	}
+	err := agent.dockerPull(opts.PullOpts)
+	if err != nil {
+		t.Errorf("Cannot pull image nginx:latest: %v", err)
 	}
 	create, err := agent.dockerCreate(opts)
 	defer func() {
-		command := "docker unpause foobar;docker inspect foobar && docker rm -vf foobar"
+		command := "docker unpause foobar;docker inspect foobar && docker rm -vf foobar; docker rmi nginx:latest"
 		cmd := exec.Command("/bin/sh", "-c", command)
 		errRun := cmd.Run()
 		if errRun != nil {

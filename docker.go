@@ -158,7 +158,6 @@ func NewDockerClient() *docker_client.Client {
 }
 
 func (agent *Agent) dockerPull(opts *DockerPullOpts) error {
-	log.Printf("Pulling %s by agent %v", opts.Image, agent)
 	ctx := context.Background()
 	pullOpts := docker_types.ImagePullOptions{}
 	if opts.ExternalAuth != nil {
