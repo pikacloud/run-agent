@@ -7,19 +7,19 @@ import (
 	"testing"
 )
 
-func createTestAgent() (*Agent, error) {
+func createTestAgent() error {
 	safeLocaltime := localtime()
 	mux.HandleFunc("/v1/run/agents/", func(w http.ResponseWriter, r *http.Request) {
 		testMethod(nil, r, "POST")
 		fmt.Fprintf(w, "{\"aid\": \"toto\", \"hostname\": \"tata\", \"localtime\": %d}", safeLocaltime)
 	})
-	agent := NewAgent("", "tata", nil)
+	agent = NewAgent("", "tata", nil)
 	agent.Client = client
 	err := agent.Register()
 	if err != nil {
-		return nil, err
+		return err
 	}
-	return agent, nil
+	return nil
 }
 
 func TestAgentCreate(t *testing.T) {
@@ -30,7 +30,7 @@ func TestAgentCreate(t *testing.T) {
 		testMethod(t, r, "POST")
 		fmt.Fprintf(w, "{\"aid\": \"toto\", \"hostname\": \"tata\", \"localtime\": %d}", safeLocaltime)
 	})
-	agent := NewAgent("", "tata", nil)
+	agent = NewAgent("", "tata", nil)
 	agent.Client = client
 	err := agent.Register()
 	if err != nil {
@@ -67,7 +67,7 @@ func TestAgentPing(t *testing.T) {
 		testMethod(t, r, "POST")
 		fmt.Fprint(w, `{"status": "OK"}`)
 	})
-	agent, err := createTestAgent()
+	err := createTestAgent()
 	if err != nil {
 		t.Errorf("Cannot create agent: %v", err)
 	}
@@ -86,7 +86,7 @@ func TestAgentLatestVersion(t *testing.T) {
 		fmt.Fprint(w, `{"version": "1.0.0"}`)
 	})
 
-	agent, err := createTestAgent()
+	err := createTestAgent()
 	if err != nil {
 		t.Errorf("Cannot create agent: %v", err)
 	}
