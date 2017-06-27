@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"flag"
 	"fmt"
 	"log"
@@ -10,8 +9,6 @@ import (
 	"runtime/pprof"
 	"sync"
 	"syscall"
-
-	docker_client "github.com/moby/moby/client"
 )
 
 const (
@@ -55,7 +52,6 @@ func main() {
 	killchan := make(chan os.Signal, 2)
 	signal.Notify(killchan, syscall.SIGINT, syscall.SIGTERM)
 	flag.Parse()
-	_agent := Agent{}
 	if *showVersion {
 		fmt.Printf("Run-agent version %s", version)
 		os.Exit(0)
@@ -78,10 +74,11 @@ func main() {
 	apiToken := os.Getenv("PIKACLOUD_API_TOKEN")
 	baseURL := os.Getenv("PIKACLOUD_AGENT_URL")
 	hostname := os.Getenv("PIKACLOUD_AGENT_HOSTNAME")
-	labels := os.Getenv("PIKACLOUD_AGENT_LABELS")
+	envLabels := os.Getenv("PIKACLOUD_AGENT_LABELS")
 	wsURLenv := os.Getenv("PIKACLOUD_WS_URL")
 	isXhyvEnv := os.Getenv("PIKACLOUD_XHYVE")
 	xhyveTTYEnv := os.Getenv("PIKACLOUD_XHYVE_TTY")
+	labels := makeLabels(envLabels)
 	if xhyveTTYEnv != "" {
 		xhyveTTY = xhyveTTYEnv
 	}
@@ -102,34 +99,11 @@ func main() {
 		}
 		hostname = h
 	}
-	if baseURL == "" {
-		baseURL = defaultBaseURL
+	agent = NewAgent(apiToken, hostname, labels)
+	if baseURL != "" {
+		agent.Client.BaseURL = baseURL
 	}
-	c := NewClient(apiToken)
-	c.BaseURL = baseURL
-	dockerClient, err := docker_client.NewEnvClient()
-	if err != nil {
-		panic(err)
-	}
-	_, err = dockerClient.ServerVersion(context.Background())
-	if err != nil {
-		panic(err)
-	}
-
-	_agent.Client = c
-	_agent.Hostname = hostname
-	_agent.DockerClient = dockerClient
-
-	agent = &_agent
-	newAgentOpts := CreateAgentOptions{
-		Hostname: hostname,
-	}
-	if labels != "" {
-		newAgentOpts.Labels = makeLabels(labels)
-		_agent.Labels = makeLabels(labels)
-	}
-
-	err = agent.Create(&newAgentOpts)
+	err := agent.Register()
 	if err != nil {
 		log.Fatalf("Unable to register agent: %s", err.Error())
 	}

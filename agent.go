@@ -41,11 +41,33 @@ func localtime() int {
 }
 
 func makeLabels(labels string) []string {
-	return strings.Split(labels, ",")
+	labelsList := strings.Split(labels, ",")
+	ret := make([]string, len(labelsList))
+	for idx, l := range labelsList {
+		l = strings.TrimSpace(l)
+		l = strings.Join(strings.Fields(l), "_")
+		ret[idx] = l
+	}
+	return ret
 }
 
-// Create an agent
-func (agent *Agent) Create(opt *CreateAgentOptions) error {
+// NewAgent create a new agent
+func NewAgent(apiToken string, hostname string, labels []string) *Agent {
+	return &Agent{
+		Hostname:     hostname,
+		Client:       NewClient(apiToken),
+		DockerClient: NewDockerClient(),
+		Labels:       labels,
+	}
+}
+
+// Register an agent
+func (agent *Agent) Register() error {
+	opt := CreateAgentOptions{
+		Hostname:  agent.Hostname,
+		Labels:    agent.Labels,
+		Localtime: localtime(),
+	}
 	status, err := agent.Client.Post("run/agents/", opt, &agent)
 	if err != nil {
 		return err
@@ -57,9 +79,19 @@ func (agent *Agent) Create(opt *CreateAgentOptions) error {
 	return nil
 }
 
+// AgentLatestVersion represents the latest agent version available
+type AgentLatestVersion struct {
+	Version string `json:"version"`
+}
+
 // lastVersion checks the latest run-agent available
-func (agent *Agent) lastVersion() (string, error) {
-	return "", nil
+func (agent *Agent) latestVersion() (string, error) {
+	version := AgentLatestVersion{}
+	err := agent.Client.Get("run/agent-version/", &version)
+	if err != nil {
+		return "", err
+	}
+	return version.Version, nil
 }
 
 func (agent *Agent) infinitePing() {
@@ -68,12 +100,7 @@ func (agent *Agent) infinitePing() {
 		if err != nil {
 			log.Printf("Cannot ping %+v", err)
 			log.Println("Trying to register lost agent")
-			newAgentOpts := CreateAgentOptions{
-				Hostname:  agent.Hostname,
-				Labels:    agent.Labels,
-				Localtime: localtime(),
-			}
-			agent.Create(&newAgentOpts)
+			agent.Register()
 			agent.syncDockerContainers(syncDockerContainersOptions{})
 			info, err := agent.DockerClient.Info(context.Background())
 			if err != nil {

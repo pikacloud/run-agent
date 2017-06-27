@@ -1,8 +1,6 @@
 package main
 
 import (
-	"fmt"
-	"net/http"
 	"testing"
 )
 
@@ -14,55 +12,28 @@ func TestNewClient(t *testing.T) {
 	}
 }
 
-func TestAgentCreate(t *testing.T) {
-	setup()
-	defer teardown()
+func TestDeleteRunningTasks(t *testing.T) {
+	runningTasksList = append(runningTasksList, "t1", "t2")
+	deleteRunningTasks("t1")
+	for _, task := range runningTasksList {
+		if task == "t1" {
+			t.Errorf("t1 found in %v", runningTasksList)
+		}
+	}
 
-	mux.HandleFunc("/v1/run/agents/", func(w http.ResponseWriter, r *http.Request) {
-		testMethod(t, r, "POST")
-		fmt.Fprint(w, `{"aid": "toto", "hostname": "tata", "localtime": 42}`)
-	})
-
-	a := Agent{
-		Client: client,
-	}
-	newAgentOpts := CreateAgentOptions{
-		Hostname:  "tata",
-		Localtime: 42,
-	}
-	err := a.Create(&newAgentOpts)
-	if err != nil {
-		t.Errorf("Cannot create agent %+v", err)
-	}
-	if a.Localtime != 42 {
-		t.Errorf("Agent Localtime=%v, want %v", a.Localtime, 42)
-	}
-	if a.ID != "toto" {
-		t.Errorf("Agent ID=%v, want %v", a.ID, "toto")
-	}
-	if a.Hostname != "tata" {
-		t.Errorf("Agent Hostname=%v, want %v", a.Hostname, "tata")
-	}
 }
 
-func TestAgentPing(t *testing.T) {
-	setup()
-	defer teardown()
-
-	mux.HandleFunc("/v1/run/agents/toto/ping/", func(w http.ResponseWriter, r *http.Request) {
-		testMethod(t, r, "POST")
-		fmt.Fprint(w, `{"status": "OK"}`)
-	})
-	a := Agent{
-		Client: client,
-		ID:     "toto",
+func TestPluralize(t *testing.T) {
+	s := pluralize(3)
+	if s != "s" {
+		t.Errorf("3 should give a plural, got %v", s)
 	}
-	newAgentOpts := CreateAgentOptions{
-		Hostname: "tata",
+	s = pluralize(1)
+	if s != "" {
+		t.Errorf("1 do not give a plural, got %v", s)
 	}
-	a.Create(&newAgentOpts)
-	err := a.Ping()
-	if err != nil {
-		t.Errorf("Ping test fails: %v", err)
+	s = pluralize(0)
+	if s != "s" {
+		t.Errorf("0 should give a plural, got %v", s)
 	}
 }

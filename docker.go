@@ -25,6 +25,7 @@ import (
 	"github.com/docker/docker/api/types/strslice"
 	docker_nat "github.com/docker/go-connections/nat"
 	"github.com/gorilla/websocket"
+	docker_client "github.com/moby/moby/client"
 )
 
 // DockerPorts describes docker ports for docker run
@@ -143,8 +144,21 @@ type syncDockerContainersOptions struct {
 	ContainersID []string
 }
 
+// NewDockerClient creates a new docker client
+func NewDockerClient() *docker_client.Client {
+	dockerClient, err := docker_client.NewEnvClient()
+	if err != nil {
+		panic(err)
+	}
+	_, err = dockerClient.ServerVersion(context.Background())
+	if err != nil {
+		panic(err)
+	}
+	return dockerClient
+}
+
 func (agent *Agent) dockerPull(opts *DockerPullOpts) error {
-	log.Printf("Pulling %s", opts.Image)
+	log.Printf("Pulling %s by agent %v", opts.Image, agent)
 	ctx := context.Background()
 	pullOpts := docker_types.ImagePullOptions{}
 	if opts.ExternalAuth != nil {
