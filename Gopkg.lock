@@ -8,12 +8,6 @@
   version = "v0.4.2"
 
 [[projects]]
-  name = "github.com/Sirupsen/logrus"
-  packages = ["."]
-  revision = "ba1b36c82c5e05c4f912a88eab0dcd91a171688f"
-  version = "v0.11.5"
-
-[[projects]]
   name = "github.com/docker/distribution"
   packages = ["digest","reference"]
   revision = "a25b9ef0c9fe242ac04bb20d3a028442b7d266b6"
@@ -29,7 +23,7 @@
   branch = "master"
   name = "github.com/docker/go-connections"
   packages = ["nat","sockets","tlsconfig"]
-  revision = "a2afab9802043837035592f1c24827fb70766de9"
+  revision = "3ede32e2033de7505e6500d6c868c2b9ed9f169d"
 
 [[projects]]
   name = "github.com/docker/go-units"
@@ -46,8 +40,8 @@
 [[projects]]
   name = "github.com/gorilla/websocket"
   packages = ["."]
-  revision = "3ab3a8b8831546bd18fd182c20687ca853b2bb13"
-  version = "v1.1.0"
+  revision = "ea4d1f681babbce9545c9c5f3d5194a789c89f5b"
+  version = "v1.2.0"
 
 [[projects]]
   name = "github.com/moby/moby"
@@ -62,20 +56,26 @@
   version = "v0.8.0"
 
 [[projects]]
+  name = "github.com/shirou/gopsutil"
+  packages = ["."]
+  revision = "e30b7839cd6161b2fbef5f187377a345157abe04"
+  version = "v2.17.05"
+
+[[projects]]
   branch = "master"
   name = "golang.org/x/net"
   packages = ["context","context/ctxhttp","proxy"]
-  revision = "3da985ce5951d99de868be4385f21ea6c2b22f24"
+  revision = "8663ed5da4fd087c3cfb99a996e628b72e2f0948"
 
 [[projects]]
   branch = "master"
   name = "golang.org/x/sys"
-  packages = ["unix","windows"]
-  revision = "b90f89a1e7a9c1f6b918820b3daa7f08488c8594"
+  packages = ["windows"]
+  revision = "90796e5a05ce440b41c768bd9af257005e470461"
 
 [solve-meta]
   analyzer-name = "dep"
   analyzer-version = 1
-  inputs-digest = "6968dda6ef4c8334e90e1d6fd10b827b099000c9f81cc498325e75ea8340abd0"
+  inputs-digest = "4f000e7012ff08fee78cfeacb909fc57a4af9dde409c9642c99aff53361cbeca"
   solver-name = "gps-cdcl"
   solver-version = 1

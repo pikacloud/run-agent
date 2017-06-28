@@ -20,6 +20,7 @@ const (
 var (
 	agent             *Agent
 	runningTasksList  []string
+	metrics           *Metrics
 	cpuprofile        = flag.String("cpuprofile", "", "write cpu profile to file")
 	showVersion       = flag.Bool("version", false, "show version")
 	showLatestVersion = flag.Bool("latest", false, "show latest version available")
@@ -53,6 +54,7 @@ func shutdown() {
 }
 
 func main() {
+	metrics = &Metrics{}
 	killchan := make(chan os.Signal, 2)
 	signal.Notify(killchan, syscall.SIGINT, syscall.SIGTERM)
 	flag.Parse()
@@ -125,6 +127,8 @@ func main() {
 	go agent.listenDockerEvents()
 	wg.Add(1)
 	go agent.infinitePullTasks()
+	wg.Add(1)
+	go agent.basicMetrics()
 	<-killchan
 	pprof.StopCPUProfile()
 	os.Exit(0)
