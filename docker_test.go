@@ -47,7 +47,7 @@ func TestDockerContainer(t *testing.T) {
 	}
 	create, err := agent.dockerCreate(opts)
 	defer func() {
-		command := "docker unpause foobar;docker inspect foobar && docker rm -vf foobar; docker rmi nginx:latest"
+		command := "docker unpause foobar;docker inspect foobar && docker rm -vf foobar; docker rmi nginx:latest || echo"
 		cmd := exec.Command("/bin/sh", "-c", command)
 		errRun := cmd.Run()
 		if errRun != nil {
@@ -93,5 +93,4 @@ func TestDockerContainer(t *testing.T) {
 	if errRun != nil {
 		t.Errorf("Container is not unpaused: %v", errRun)
 	}
-
 }

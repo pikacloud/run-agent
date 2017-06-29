@@ -1,4 +1,5 @@
-VERSION := `cat VERSION`
+VERSION := $(shell cat VERSION)
+BUILDFLAGS := -ldflags "-X main.version=$(VERSION)"
 
 test:
 	go test -v
@@ -8,10 +9,10 @@ dep:
 	dep ensure -v
 
 build:
-	go build -v -ldflags "-X main.version=$(VERSION)"
+	go build -v $(BUILDFLAGS)
 
 install:
-	go install
+	go install -v $(BUILDFLAGS)
 
 latest:
 	docker build -t run-agent .

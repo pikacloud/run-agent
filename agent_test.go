@@ -90,11 +90,11 @@ func TestAgentLatestVersion(t *testing.T) {
 	if err != nil {
 		t.Errorf("Cannot create agent: %v", err)
 	}
-	version, err := agent.latestVersion()
+	v, err := agent.latestVersion()
 	if err != nil {
 		t.Errorf("Cannot fetch latest version %+v", err)
 	}
-	if version != "1.0.0" {
-		t.Errorf("Version is %v, want %v", version, "1.0.0")
+	if v != "1.0.0" {
+		t.Errorf("Version is %v, want %v", v, "1.0.0")
 	}
 }
