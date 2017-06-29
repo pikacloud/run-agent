@@ -57,6 +57,11 @@ func TestMakeLabels(t *testing.T) {
 	if !reflect.DeepEqual(want, res) {
 		t.Errorf("Labels array is %v, want %v", res, want)
 	}
+	labelsStr = ""
+	res = makeLabels(labelsStr)
+	if len(res) != 0 {
+		t.Errorf("We should have 0 labels, got %d: %+v", len(res), res)
+	}
 }
 
 func TestAgentPing(t *testing.T) {

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"strings"
@@ -45,6 +46,9 @@ func makeLabels(labels string) []string {
 	labelsList := strings.Split(labels, ",")
 	ret := make([]string, len(labelsList))
 	for idx, l := range labelsList {
+		if l == "" {
+			return nil
+		}
 		l = strings.TrimSpace(l)
 		l = strings.Join(strings.Fields(l), "_")
 		ret[idx] = l
@@ -66,10 +70,14 @@ func NewAgent(apiToken string, hostname string, labels []string) *Agent {
 func (agent *Agent) Register() error {
 	opt := CreateAgentOptions{
 		Hostname:  agent.Hostname,
-		Labels:    agent.Labels,
 		Localtime: localtime(),
 		Version:   version,
 	}
+	if len(agent.Labels) > 0 {
+		opt.Labels = agent.Labels
+	}
+	j, _ := json.Marshal(opt)
+	fmt.Println(agent.Labels, len(agent.Labels), string(j))
 	status, err := agent.Client.Post("run/agents/", opt, &agent)
 	if err != nil {
 		return err
