@@ -1,14 +1,16 @@
 VERSION := `cat VERSION`
 
-test: dep
+test:
 	go test -v
 
 dep:
 	go get -u github.com/golang/dep/cmd/dep
 	dep ensure -v
 
-build: dep test
-	go build -v -ldflags "-X main.xyz=$(VERSION)"
+build:
+	go build -v -ldflags "-X main.version=$(VERSION)"
+
+install:
 	go install
 
 latest:

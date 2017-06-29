@@ -15,6 +15,7 @@ type CreateAgentOptions struct {
 	Hostname  string   `json:"hostname"`
 	Labels    []string `json:"labels,omitempty"`
 	Localtime int      `json:"localtime"`
+	Version   string   `json:"version"`
 }
 
 // PingAgentOptions represents the agent Ping() options
@@ -67,6 +68,7 @@ func (agent *Agent) Register() error {
 		Hostname:  agent.Hostname,
 		Labels:    agent.Labels,
 		Localtime: localtime(),
+		Version:   version,
 	}
 	status, err := agent.Client.Post("run/agents/", opt, &agent)
 	if err != nil {
@@ -75,7 +77,7 @@ func (agent *Agent) Register() error {
 	if status != 200 {
 		return fmt.Errorf("Failed to create agent http code: %d", status)
 	}
-	log.Printf("Agent %s registered with hostname %s\n", agent.ID, agent.Hostname)
+	log.Printf("Agent %s registered with hostname %s (agent version %s)\n", agent.ID, agent.Hostname, version)
 	return nil
 }
 
