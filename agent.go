@@ -133,7 +133,6 @@ func (agent *Agent) Ping() error {
 		RunningTasks: runningTasksList,
 		Localtime:    localtime(),
 	}
-	log.Println(opts.Metrics)
 	for t := range runningTerminalsList {
 		opts.RunningTerminals = append(opts.RunningTerminals, t.Task.ID)
 	}
