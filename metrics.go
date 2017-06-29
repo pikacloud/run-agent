@@ -11,8 +11,17 @@ import (
 
 //Metrics represents a basic struct with systems stats
 type Metrics struct {
-	CpuStats []cpu.TimesStat        `json:"cpustats"`
-	MemStats *mem.VirtualMemoryStat `json:"memstats"`
+	CPUStats  []cpu.TimesStat        `json:"cpustats"`
+	MemStats  *mem.VirtualMemoryStat `json:"memstats"`
+	SwapStats *mem.SwapMemoryStat    `json:"swapstats"`
+}
+
+func getSWAPInfo() (*mem.SwapMemoryStat, error) {
+	swapstats, err := mem.SwapMemory()
+	if err != nil {
+		return nil, fmt.Errorf("Error getting swap information: %v", err)
+	}
+	return swapstats, nil
 }
 
 func getRAMInfo() (*mem.VirtualMemoryStat, error) {
@@ -41,8 +50,13 @@ func (agent *Agent) basicMetrics() {
 		if err != nil {
 			log.Println(err)
 		}
-		metrics.CpuStats = c
+		s, err := getSWAPInfo()
+		if err != nil {
+			log.Println(err)
+		}
+		metrics.CPUStats = c
 		metrics.MemStats = m
+		metrics.SwapStats = s
 		time.Sleep(3 * time.Second)
 	}
 }
