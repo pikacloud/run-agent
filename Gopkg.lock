@@ -69,25 +69,25 @@
 
 [[projects]]
   name = "github.com/shirou/gopsutil"
-  packages = ["cpu","internal/common","mem"]
-  revision = "e30b7839cd6161b2fbef5f187377a345157abe04"
-  version = "v2.17.05"
+  packages = ["cpu","disk","internal/common","load","mem"]
+  revision = "aa0a3bce9d1f4efc710ed812f19f77851da2eedd"
+  version = "v2.17.06"
 
 [[projects]]
   branch = "master"
   name = "golang.org/x/net"
   packages = ["context","context/ctxhttp","proxy"]
-  revision = "c81e7f25cb61200d8bf0ae971a0bac8cb638d5bc"
+  revision = "570fa1c91359c1869590e9cedf3b53162a51a167"
 
 [[projects]]
   branch = "master"
   name = "golang.org/x/sys"
-  packages = ["windows"]
-  revision = "90796e5a05ce440b41c768bd9af257005e470461"
+  packages = ["unix","windows"]
+  revision = "94b76065f2d2081d0fef24a6e67c571f51a6408a"
 
 [solve-meta]
   analyzer-name = "dep"
   analyzer-version = 1
-  inputs-digest = "5b749fc8cf67d7017c5fbe24999b774e95c24fc488a16a666d97ec61866fc019"
+  inputs-digest = "0b80529065d92154ec1cac1cf36585aea0a3b299050ee17805022d89f7998ded"
   solver-name = "gps-cdcl"
   solver-version = 1
