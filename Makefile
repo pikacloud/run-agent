@@ -17,9 +17,7 @@ install:
 latest:
 	docker build -t run-agent .
 	docker tag run-agent pikacloud/run-agent:latest
-	docker tag run-agent pikacloud/run-agent:$(VERSION)
 	docker push pikacloud/run-agent:latest
-	docker push pikacloud/run-agent:$(VERSION)
 
 clean:
 	rm -rf vendor
