@@ -9,6 +9,7 @@ import (
 	"github.com/shirou/gopsutil/disk"
 	"github.com/shirou/gopsutil/load"
 	"github.com/shirou/gopsutil/mem"
+	"github.com/shirou/gopsutil/net"
 )
 
 //Metrics represents a basic struct with systems stats
@@ -25,6 +26,21 @@ type Metrics struct {
 	//Load Average
 	LoadAverage *load.AvgStat  `json:"loadaverage"`
 	MiscStats   *load.MiscStat `json:"miscstats"`
+	//Network
+	InterfaceStats []net.InterfaceStat  `json:"interfacestats"`
+	IONetStats     []net.IOCountersStat `json:"ionetstats"`
+}
+
+func getNetInfo() ([]net.InterfaceStat, []net.IOCountersStat, error) {
+	istats, err := net.Interfaces()
+	if err != nil {
+		return nil, nil, fmt.Errorf("Error getting network interfaces stats: %v", err)
+	}
+	ionetstats, err := net.IOCounters(true)
+	if err != nil {
+		return nil, nil, fmt.Errorf("Error getting network io stats for %v", err)
+	}
+	return istats, ionetstats, nil
 }
 
 func getLoadAverage() (*load.AvgStat, *load.MiscStat, error) {
@@ -48,20 +64,13 @@ func getDiskInfo() (map[string]disk.IOCountersStat, []disk.PartitionStat, []*dis
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("Error getting io stats for %v", err)
 	}
-	//var iostats []map[string]disk.IOCountersStat
 	var usstats []*disk.UsageStat
-	//fmt.Println(pstats)
 	for _, partition := range pstats {
-		//fmt.Println(partition)
-
-		//iostats = append(iostats, iostat)
 		usstat, err := disk.Usage(partition.Device)
 		if err != nil {
 			return nil, nil, nil, fmt.Errorf("Error getting usage stats for %s: %v", partition.Device, err)
 		}
 		usstats = append(usstats, usstat)
-		//partitions = append(partitions, partition.Device)
-		//fmt.Println(disk.IOCounters(partition.Device))
 	}
 	return iostats, pstats, usstats, nil
 }
@@ -109,6 +118,13 @@ func (agent *Agent) basicMetrics() {
 			log.Println(err)
 		}
 		la, ms, err := getLoadAverage()
+		if err != nil {
+			log.Println(err)
+		}
+		ni, ionet, err := getNetInfo()
+		if err != nil {
+			log.Println(err)
+		}
 		metrics.CPUStats = c
 		metrics.MemStats = m
 		metrics.SwapStats = s
@@ -117,6 +133,8 @@ func (agent *Agent) basicMetrics() {
 		metrics.UsageStats = us
 		metrics.LoadAverage = la
 		metrics.MiscStats = ms
+		metrics.InterfaceStats = ni
+		metrics.IONetStats = ionet
 		time.Sleep(3 * time.Second)
 	}
 }
