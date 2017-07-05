@@ -168,20 +168,11 @@ func (agent *Agent) infinitePullTasks() {
 			if task.NeedACK {
 				runningTasksList = append(runningTasksList, task.ID)
 			}
-			ackTask, err := task.Do()
+			err := task.Do()
 			if err != nil {
 				log.Printf("Unable to do task %s: %s", task.ID, err)
 			}
 			log.Printf("task %s done!", task.ID)
-			if task.NeedACK {
-				err := agent.ackTask(&task, &ackTask)
-				if err != nil {
-					log.Printf("Unable to ack task %s: %s", task.ID, err)
-				} else {
-					log.Printf("task %s ACKed", task.ID)
-				}
-				deleteRunningTasks(task.ID)
-			}
 		}
 		time.Sleep(3 * time.Second)
 	}

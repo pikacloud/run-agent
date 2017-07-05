@@ -48,6 +48,10 @@ func pluralize(n int) string {
 	return ""
 }
 
+func shutdown() {
+	os.Exit(0)
+}
+
 func main() {
 	killchan := make(chan os.Signal, 2)
 	signal.Notify(killchan, syscall.SIGINT, syscall.SIGTERM)
