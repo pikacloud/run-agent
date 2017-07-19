@@ -29,6 +29,8 @@ type Metrics struct {
 	//Network
 	InterfaceStats []net.InterfaceStat  `json:"interfacestats"`
 	IONetStats     []net.IOCountersStat `json:"ionetstats"`
+	//Agent pikacloud
+	Labels []string `json:"labels"`
 }
 
 func getNetInfo() ([]net.InterfaceStat, []net.IOCountersStat, error) {
@@ -135,6 +137,7 @@ func (agent *Agent) basicMetrics() {
 		metrics.MiscStats = ms
 		metrics.InterfaceStats = ni
 		metrics.IONetStats = ionet
+		metrics.Labels = agent.Labels
 		time.Sleep(3 * time.Second)
 	}
 }
