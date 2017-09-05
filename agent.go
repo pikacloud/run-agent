@@ -21,6 +21,7 @@ type CreateAgentOptions struct {
 
 // PingAgentOptions represents the agent Ping() options
 type PingAgentOptions struct {
+	Metrics          *Metrics `json:"metrics,omitempty"`
 	RunningTasks     []string `json:"running_tasks,omitempty"`
 	RunningTerminals []string `json:"running_terminals,omitempty"`
 	Localtime        int      `json:"localtime"`
@@ -128,6 +129,7 @@ func (agent *Agent) infinitePing() {
 func (agent *Agent) Ping() error {
 	pingURI := fmt.Sprintf("run/agents/%s/ping/", agent.ID)
 	opts := PingAgentOptions{
+		Metrics:      metrics,
 		RunningTasks: runningTasksList,
 		Localtime:    localtime(),
 	}
@@ -139,7 +141,7 @@ func (agent *Agent) Ping() error {
 		return err
 	}
 	if status != 200 {
-		return fmt.Errorf("Ping to %s returns %d\n", pingURI, status)
+		return fmt.Errorf("ping to %s returns %d codes", pingURI, status)
 	}
 	log.Printf("Ping OK (%d running task%s, %d running terminal%s)", len(opts.RunningTasks), pluralize(len(opts.RunningTasks)), len(opts.RunningTerminals), pluralize(len(opts.RunningTerminals)))
 	return nil

@@ -8,10 +8,10 @@
   version = "v0.4.2"
 
 [[projects]]
-  name = "github.com/Sirupsen/logrus"
+  branch = "master"
+  name = "github.com/StackExchange/wmi"
   packages = ["."]
-  revision = "ba1b36c82c5e05c4f912a88eab0dcd91a171688f"
-  version = "v0.11.5"
+  revision = "ea383cf3ba6ec950874b8486cd72356d007c768f"
 
 [[projects]]
   name = "github.com/docker/distribution"
@@ -29,7 +29,7 @@
   branch = "master"
   name = "github.com/docker/go-connections"
   packages = ["nat","sockets","tlsconfig"]
-  revision = "a2afab9802043837035592f1c24827fb70766de9"
+  revision = "3ede32e2033de7505e6500d6c868c2b9ed9f169d"
 
 [[projects]]
   name = "github.com/docker/go-units"
@@ -44,10 +44,16 @@
   revision = "1b2437bc582b3cfbb341ee5a29f8ef5b42912ff2"
 
 [[projects]]
+  name = "github.com/go-ole/go-ole"
+  packages = [".","oleutil"]
+  revision = "0e87ea779d9deb219633b828a023b32e1244dd57"
+  version = "v1.2.0"
+
+[[projects]]
   name = "github.com/gorilla/websocket"
   packages = ["."]
-  revision = "3ab3a8b8831546bd18fd182c20687ca853b2bb13"
-  version = "v1.1.0"
+  revision = "ea4d1f681babbce9545c9c5f3d5194a789c89f5b"
+  version = "v1.2.0"
 
 [[projects]]
   name = "github.com/moby/moby"
@@ -62,20 +68,26 @@
   version = "v0.8.0"
 
 [[projects]]
+  name = "github.com/shirou/gopsutil"
+  packages = ["cpu","disk","internal/common","load","mem","net"]
+  revision = "aa0a3bce9d1f4efc710ed812f19f77851da2eedd"
+  version = "v2.17.06"
+
+[[projects]]
   branch = "master"
   name = "golang.org/x/net"
   packages = ["context","context/ctxhttp","proxy"]
-  revision = "3da985ce5951d99de868be4385f21ea6c2b22f24"
+  revision = "570fa1c91359c1869590e9cedf3b53162a51a167"
 
 [[projects]]
   branch = "master"
   name = "golang.org/x/sys"
   packages = ["unix","windows"]
-  revision = "b90f89a1e7a9c1f6b918820b3daa7f08488c8594"
+  revision = "94b76065f2d2081d0fef24a6e67c571f51a6408a"
 
 [solve-meta]
   analyzer-name = "dep"
   analyzer-version = 1
-  inputs-digest = "6968dda6ef4c8334e90e1d6fd10b827b099000c9f81cc498325e75ea8340abd0"
+  inputs-digest = "9282d99fbd4583b9c2e0354778371a1c017c707c81a3a8a089e4370ea818ef37"
   solver-name = "gps-cdcl"
   solver-version = 1
