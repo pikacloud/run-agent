@@ -2,28 +2,28 @@
 
 
 [[projects]]
-  branch = "master"
+  branch = "dont_export_tests"
   name = "github.com/Azure/go-ansiterm"
   packages = [".","winterm"]
-  revision = "19f72df4d05d31cbe1c56bfc8045c96babff6c7e"
+  revision = "04b7f292a41fcb5da32dda536c0807fc13e8351c"
 
 [[projects]]
   name = "github.com/Microsoft/go-winio"
   packages = ["."]
-  revision = "f533f7a102197536779ea3a8cb881d639e21ec5a"
-  version = "v0.4.2"
+  revision = "78439966b38d69bf38227fbf57ac8a6fee70f69a"
+  version = "v0.4.5"
 
 [[projects]]
   name = "github.com/Sirupsen/logrus"
   packages = ["."]
-  revision = "ba1b36c82c5e05c4f912a88eab0dcd91a171688f"
-  version = "v0.11.5"
+  revision = "f006c2ac4710855cf0f916dd6b77acf6b048dc6e"
+  version = "v1.0.3"
 
 [[projects]]
   name = "github.com/docker/distribution"
   packages = ["digest","reference"]
-  revision = "a25b9ef0c9fe242ac04bb20d3a028442b7d266b6"
-  version = "v2.6.1"
+  revision = "48294d928ced5dd9b378f7fd7c6f5da3ff3f2c89"
+  version = "v2.6.2"
 
 [[projects]]
   name = "github.com/docker/docker"
@@ -35,7 +35,7 @@
   branch = "master"
   name = "github.com/docker/go-connections"
   packages = ["nat","sockets","tlsconfig"]
-  revision = "a2afab9802043837035592f1c24827fb70766de9"
+  revision = "3ede32e2033de7505e6500d6c868c2b9ed9f169d"
 
 [[projects]]
   name = "github.com/docker/go-units"
@@ -52,8 +52,8 @@
 [[projects]]
   name = "github.com/gorilla/websocket"
   packages = ["."]
-  revision = "3ab3a8b8831546bd18fd182c20687ca853b2bb13"
-  version = "v1.1.0"
+  revision = "ea4d1f681babbce9545c9c5f3d5194a789c89f5b"
+  version = "v1.2.0"
 
 [[projects]]
   branch = "master"
@@ -86,12 +86,6 @@
   revision = "feef008d51ad2b3778f85d387ccf91735543008d"
 
 [[projects]]
-  name = "github.com/sirupsen/logrus"
-  packages = ["."]
-  revision = "f006c2ac4710855cf0f916dd6b77acf6b048dc6e"
-  version = "v1.0.3"
-
-[[projects]]
   name = "github.com/src-d/gcfg"
   packages = [".","scanner","token","types"]
   revision = "f187355171c936ac84a82793659ebb4936bc1c23"
@@ -113,13 +107,13 @@
   branch = "master"
   name = "golang.org/x/net"
   packages = ["context","context/ctxhttp","proxy"]
-  revision = "3da985ce5951d99de868be4385f21ea6c2b22f24"
+  revision = "66aacef3dd8a676686c7ae3716979581e8b03c47"
 
 [[projects]]
   branch = "master"
   name = "golang.org/x/sys"
   packages = ["unix","windows"]
-  revision = "b90f89a1e7a9c1f6b918820b3daa7f08488c8594"
+  revision = "7ddbeae9ae08c6a06a59597f0c9edbc5ff2444ce"
 
 [[projects]]
   branch = "master"
@@ -136,8 +130,8 @@
 [[projects]]
   name = "gopkg.in/src-d/go-git.v4"
   packages = [".","config","internal/revision","plumbing","plumbing/cache","plumbing/filemode","plumbing/format/config","plumbing/format/diff","plumbing/format/gitignore","plumbing/format/idxfile","plumbing/format/index","plumbing/format/objfile","plumbing/format/packfile","plumbing/format/pktline","plumbing/object","plumbing/protocol/packp","plumbing/protocol/packp/capability","plumbing/protocol/packp/sideband","plumbing/revlist","plumbing/storer","plumbing/transport","plumbing/transport/client","plumbing/transport/file","plumbing/transport/git","plumbing/transport/http","plumbing/transport/internal/common","plumbing/transport/server","plumbing/transport/ssh","storage","storage/filesystem","storage/filesystem/internal/dotgit","storage/memory","utils/binary","utils/diff","utils/ioutil","utils/merkletrie","utils/merkletrie/filesystem","utils/merkletrie/index","utils/merkletrie/internal/frame","utils/merkletrie/noder"]
-  revision = "7aa9d15d395282144f31a09c0fac230da3f65360"
-  version = "v4.0.0-rc14"
+  revision = "f9879dd043f84936a1f8acb8a53b74332a7ae135"
+  version = "v4.0.0-rc15"
 
 [[projects]]
   name = "gopkg.in/warnings.v0"

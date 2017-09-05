@@ -65,6 +65,9 @@
 # source = "https://github.com/myfork/package.git"
 
 
+[[constraint]]
+  name = "github.com/Sirupsen/logrus"
+  version = "v1.0.3"
 
 [[constraint]]
   branch = "master"
