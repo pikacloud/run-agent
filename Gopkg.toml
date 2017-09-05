@@ -64,6 +64,10 @@
 ## what source location any dependent projects specify.
 # source = "https://github.com/myfork/package.git"
 
+[[override]]
+  branch = "master"
+  name = "github.com/Azure/go-ansiterm"
+	source = "https://github.com/bjorand/go-ansiterm.git"
 
 
 [[constraint]]
