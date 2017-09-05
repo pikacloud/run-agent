@@ -164,25 +164,34 @@ func (agent *Agent) infinitePullTasks() {
 			log.Println(err)
 		}
 		if len(tasks) > 0 {
-			log.Printf("Got %d new tasks", len(tasks))
+			tasksID := []string{}
+			for _, t := range tasks {
+				tasksID = append(tasksID, t.ID)
+			}
+			log.Printf("Got %d new tasks %s", len(tasks), strings.Join(tasksID, ", "))
 		}
 		for _, task := range tasks {
 			if task.NeedACK {
+				lock.RLock()
 				runningTasksList = append(runningTasksList, task.ID)
+				lock.RUnlock()
 			}
-			err := task.Do()
-			if err != nil {
-				log.Printf("Unable to do task %s: %s", task.ID, err)
-			}
-			log.Printf("task %s done!", task.ID)
+			go func(t *Task) {
+				log.Println("running task", t.ID)
+				err := t.Do()
+				if err != nil {
+					log.Printf("Unable to do task %s: %s", t.ID, err)
+				}
+				log.Printf("task %s done!", t.ID)
+			}(task)
 		}
 		time.Sleep(3 * time.Second)
 	}
 }
 
-func (agent *Agent) pullTasks() ([]Task, error) {
+func (agent *Agent) pullTasks() ([]*Task, error) {
 	tasksURI := fmt.Sprintf("run/agents/%s/tasks/ready/?requeue=false&size=50", agent.ID)
-	tasks := []Task{}
+	tasks := []*Task{}
 	err := agent.Client.Get(tasksURI, &tasks)
 	if err != nil {
 		log.Println(err)
