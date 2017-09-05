@@ -27,15 +27,8 @@ var (
 	isXhyve           = false
 	xhyveTTY          = "~/Library/Containers/com.docker.docker/Data/com.docker.driver.amd64-linux/tty"
 	version           string
+	lock              = sync.RWMutex{}
 )
-
-func deleteRunningTasks(tid string) {
-	for idx, t := range runningTasksList {
-		if t == tid {
-			runningTasksList = runningTasksList[:idx+copy(runningTasksList[idx:], runningTasksList[idx+1:])]
-		}
-	}
-}
 
 // PluginConfig describes a plugin option
 type PluginConfig struct {

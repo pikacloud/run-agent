@@ -15,6 +15,7 @@ type TaskStep struct {
 	WaitForCompletion   bool            `json:"wait_for_completion"`
 	AckBeforeCompletion bool            `json:"ack_before_completion"`
 	Task                *Task
+	ResultMessage       string
 }
 
 // Task descibres a task
@@ -35,6 +36,14 @@ type TaskACK struct {
 	TaskACKStep []*TaskACKStep `json:"results"`
 }
 
+func deleteRunningTasks(tid string) {
+	for idx, t := range runningTasksList {
+		if t == tid {
+			runningTasksList = runningTasksList[:idx+copy(runningTasksList[idx:], runningTasksList[idx+1:])]
+		}
+	}
+}
+
 // Do a step
 func (step *TaskStep) Do() error {
 	switch step.Plugin {
@@ -42,6 +51,8 @@ func (step *TaskStep) Do() error {
 		return step.System()
 	case "docker":
 		return step.Docker()
+	case "git":
+		return step.Git()
 	default:
 		return fmt.Errorf("Unknown step plugin %s", step.Plugin)
 	}
@@ -50,7 +61,7 @@ func (step *TaskStep) Do() error {
 // Do a task
 func (task *Task) Do() error {
 	ack := TaskACK{}
-	alreayAcked := false
+	alreadyAcked := false
 	for _, step := range task.Steps {
 		ackStep := TaskACKStep{}
 		step.Task = task
@@ -59,10 +70,9 @@ func (task *Task) Do() error {
 			if err != nil {
 				log.Printf("Unable to ack task %s before running step: %s", task.ID, err)
 			} else {
-				alreayAcked = true
-				deleteRunningTasks(task.ID)
 				log.Printf("task %s ACKed before running step", task.ID)
 			}
+			alreadyAcked = true
 		}
 		err := step.Do()
 		if err != nil {
@@ -75,18 +85,23 @@ func (task *Task) Do() error {
 			}
 		} else {
 			ackStep.Success = true
-			ackStep.Message = "OK"
+			if step.ResultMessage != "" {
+				ackStep.Message = step.ResultMessage
+			} else {
+				ackStep.Message = "OK"
+			}
+
 		}
 		ack.TaskACKStep = append(ack.TaskACKStep, &ackStep)
 	}
-	if task.NeedACK && alreayAcked == false {
+	if task.NeedACK && alreadyAcked == false {
 		err := agent.ackTask(task, &ack)
 		if err != nil {
 			log.Printf("Unable to ack task %s: %s", task.ID, err)
 		} else {
 			log.Printf("task %s ACKed", task.ID)
 		}
-		deleteRunningTasks(task.ID)
 	}
+	deleteRunningTasks(task.ID)
 	return nil
 }

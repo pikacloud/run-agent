@@ -63,7 +63,7 @@ func (r *ErrorResponse) Error() string {
 
 // CheckResponse checks the API response for errors, and returns them if present.
 func CheckResponse(resp *http.Response) error {
-	if code := resp.StatusCode; 200 == code && code <= 299 {
+	if code := resp.StatusCode; 200 <= code && code <= 299 {
 		return nil
 	}
 	errorResponse := &ErrorResponse{}

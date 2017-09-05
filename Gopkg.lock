@@ -50,6 +50,18 @@
   version = "v1.1.0"
 
 [[projects]]
+  branch = "master"
+  name = "github.com/jbenet/go-context"
+  packages = ["io"]
+  revision = "d14ea06fba99483203c19d92cfcd13ebe73135f4"
+
+[[projects]]
+  branch = "master"
+  name = "github.com/mitchellh/go-homedir"
+  packages = ["."]
+  revision = "b8bc1bf767474819792c23f32d8286a45736f1c6"
+
+[[projects]]
   name = "github.com/moby/moby"
   packages = ["client"]
   revision = "092cba3727bb9b4a2f0e922cd6c0f93ea270e363"
@@ -63,6 +75,30 @@
 
 [[projects]]
   branch = "master"
+  name = "github.com/sergi/go-diff"
+  packages = ["diffmatchpatch"]
+  revision = "feef008d51ad2b3778f85d387ccf91735543008d"
+
+[[projects]]
+  name = "github.com/src-d/gcfg"
+  packages = [".","scanner","token","types"]
+  revision = "f187355171c936ac84a82793659ebb4936bc1c23"
+  version = "v1.3.0"
+
+[[projects]]
+  branch = "master"
+  name = "github.com/xanzy/ssh-agent"
+  packages = ["."]
+  revision = "ba9c9e33906f58169366275e3450db66139a31a9"
+
+[[projects]]
+  branch = "master"
+  name = "golang.org/x/crypto"
+  packages = ["curve25519","ed25519","ed25519/internal/edwards25519","ssh","ssh/agent","ssh/knownhosts"]
+  revision = "81e90905daefcd6fd217b62423c0908922eadb30"
+
+[[projects]]
+  branch = "master"
   name = "golang.org/x/net"
   packages = ["context","context/ctxhttp","proxy"]
   revision = "3da985ce5951d99de868be4385f21ea6c2b22f24"
@@ -73,9 +109,33 @@
   packages = ["unix","windows"]
   revision = "b90f89a1e7a9c1f6b918820b3daa7f08488c8594"
 
+[[projects]]
+  branch = "master"
+  name = "golang.org/x/text"
+  packages = ["internal/gen","internal/triegen","internal/ucd","transform","unicode/cldr","unicode/norm"]
+  revision = "bd91bbf73e9a4a801adbfb97133c992678533126"
+
+[[projects]]
+  name = "gopkg.in/src-d/go-billy.v3"
+  packages = [".","helper/chroot","helper/polyfill","osfs","util"]
+  revision = "c329b7bc7b9d24905d2bc1b85bfa29f7ae266314"
+  version = "v3.1.0"
+
+[[projects]]
+  name = "gopkg.in/src-d/go-git.v4"
+  packages = [".","config","internal/revision","plumbing","plumbing/cache","plumbing/filemode","plumbing/format/config","plumbing/format/diff","plumbing/format/gitignore","plumbing/format/idxfile","plumbing/format/index","plumbing/format/objfile","plumbing/format/packfile","plumbing/format/pktline","plumbing/object","plumbing/protocol/packp","plumbing/protocol/packp/capability","plumbing/protocol/packp/sideband","plumbing/revlist","plumbing/storer","plumbing/transport","plumbing/transport/client","plumbing/transport/file","plumbing/transport/git","plumbing/transport/http","plumbing/transport/internal/common","plumbing/transport/server","plumbing/transport/ssh","storage","storage/filesystem","storage/filesystem/internal/dotgit","storage/memory","utils/binary","utils/diff","utils/ioutil","utils/merkletrie","utils/merkletrie/filesystem","utils/merkletrie/index","utils/merkletrie/internal/frame","utils/merkletrie/noder"]
+  revision = "7aa9d15d395282144f31a09c0fac230da3f65360"
+  version = "v4.0.0-rc14"
+
+[[projects]]
+  name = "gopkg.in/warnings.v0"
+  packages = ["."]
+  revision = "8a331561fe74dadba6edfc59f3be66c22c3b065d"
+  version = "v0.1.1"
+
 [solve-meta]
   analyzer-name = "dep"
   analyzer-version = 1
-  inputs-digest = "6968dda6ef4c8334e90e1d6fd10b827b099000c9f81cc498325e75ea8340abd0"
+  inputs-digest = "6788f09a3ddf8d12f9c8417c24e6951b3c2936a8f04678f8c3c5e543b9158d1e"
   solver-name = "gps-cdcl"
   solver-version = 1

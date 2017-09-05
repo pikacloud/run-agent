@@ -9,6 +9,7 @@ import (
 	"io/ioutil"
 	"log"
 	"net/url"
+	"os"
 	"os/exec"
 	"reflect"
 	"runtime"
@@ -26,6 +27,8 @@ import (
 	docker_nat "github.com/docker/go-connections/nat"
 	"github.com/gorilla/websocket"
 	docker_client "github.com/moby/moby/client"
+	"github.com/moby/moby/pkg/jsonmessage"
+	"github.com/moby/moby/pkg/term"
 )
 
 // DockerPorts describes docker ports for docker run
@@ -115,6 +118,13 @@ type DockerRemoveOpts struct {
 type DockerTerminalOpts struct {
 	ID   string `json:"id"`
 	Task *Task
+}
+
+// DockerBuildOpts describes docker build options
+type DockerBuildOpts struct {
+	Tag           string `json:"tag"`
+	Path          string `json:"path"`
+	ClearBuildDir bool   `json:"clear_build_dir"`
 }
 
 var (
@@ -277,13 +287,80 @@ func (agent *Agent) dockerRemove(containerID string, opts *DockerRemoveOpts) err
 	return nil
 }
 
+type LogWriter log.Logger
+
+func (w *LogWriter) Write(b []byte) (int, error) {
+	(*log.Logger)(w).Print(string(b))
+	return len(b), nil
+}
+
+func (agent *Agent) dockerBuild(opts *DockerBuildOpts) error {
+	// create tarball of src
+	// var buf bytes.Buffer
+	// writer := io.Writer(&buf)
+
+	var writer io.WriteCloser
+	tarFileName := fmt.Sprintf("%s.tar", opts.Path)
+	writer, err := os.Create(tarFileName)
+	if err != nil {
+		return err
+	}
+	defer writer.Close()
+	log.Printf("Writing image %s tarball to %s", opts.Tag, tarFileName)
+	errTar := Tar(opts.Path, false, writer)
+	if errTar != nil {
+		return errTar
+	}
+	dockerBuildContext, err := os.Open(tarFileName)
+	if err != nil {
+		return err
+	}
+	defer dockerBuildContext.Close()
+	// defer os.RemoveAll(opts.Path)
+	log.Printf("Building image %s", opts.Tag)
+	buildOpts := docker_types.ImageBuildOptions{
+		NoCache:    true,
+		Dockerfile: "Dockerfile",
+		Tags:       []string{opts.Tag},
+	}
+	ctx := context.Background()
+	buildResponse, err := agent.DockerClient.ImageBuild(ctx, dockerBuildContext, buildOpts)
+	if err != nil {
+		return err
+	}
+	defer buildResponse.Body.Close()
+	log.Printf("Image %s built", opts.Tag)
+	logBuff := os.Stdout
+	outFd, isTerminalOut := term.GetFdInfo(os.Stdout)
+	// w := l.OutWriter()
+	// if w != nil {
+	// 	outFd, isTerminalOut = term.GetFdInfo(w)
+	// }
+	// logBuff = io.Writer{}
+	// TODO: write message to our websocket server
+	err = jsonmessage.DisplayJSONMessagesStream(buildResponse.Body, logBuff, outFd, isTerminalOut, nil)
+	if err != nil {
+		if jerr, ok := err.(*jsonmessage.JSONError); ok {
+			// If no error code is set, default to 1
+			if jerr.Code == 0 {
+				jerr.Code = 1
+			}
+			// errBuff.Write([]byte(jerr.Error()))
+			fmt.Println([]byte(jerr.Error()))
+			return fmt.Errorf("Status: %s, Code: %d", jerr.Message, jerr.Code)
+		}
+	}
+	// push image
+	return nil
+}
+
 func (agent *Agent) dockerTerminal(opts *DockerTerminalOpts) error {
-	// connect to websocket /aid/cid/tid
+	// connect to websocket
 	quit := false
 	wsURLParams := strings.Split(wsURL, "://")
 	scheme := wsURLParams[0]
 	addr := wsURLParams[1]
-	path := fmt.Sprintf("/_ws/agent/%s/%s/%s/", agent.ID, opts.ID, opts.Task.ID)
+	path := fmt.Sprintf("/_ws/hub/agent/%s:%s:%s:%s", agent.ID, opts.ID, opts.Task.ID)
 	u := url.URL{Scheme: scheme, Host: addr, Path: path}
 	log.Printf("connecting to %s", u.String())
 
@@ -502,7 +579,7 @@ func (agent *Agent) dockerTerminal(opts *DockerTerminalOpts) error {
 					continue
 				}
 				log.Printf("Resizing terminal %+v", resizeMessage)
-				errResize := agent.ContainerExecResize(execCreateResponse.ID, resizeMessage.Cols, resizeMessage.Rows)
+				errResize := agent.ContainerExecResize(execCreateResponse.ID, resizeMessage.Rows, resizeMessage.Cols)
 				if err != nil {
 					log.Printf("Unable to resize terminal %+v", errResize)
 				}
@@ -879,6 +956,17 @@ func (step *TaskStep) Docker() error {
 			return fmt.Errorf("Bad config for docker pull: %s (%v)", err, step.PluginConfig)
 		}
 		err = agent.dockerPull(&pullOpts)
+		if err != nil {
+			return err
+		}
+		return nil
+	case "build":
+		var buildOpts = DockerBuildOpts{}
+		err := json.Unmarshal([]byte(step.PluginConfig), &buildOpts)
+		if err != nil {
+			return fmt.Errorf("Bad config for docker build: %s (%v)", err, step.PluginConfig)
+		}
+		err = agent.dockerBuild(&buildOpts)
 		if err != nil {
 			return err
 		}
