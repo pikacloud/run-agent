@@ -2,6 +2,12 @@
 
 
 [[projects]]
+  branch = "master"
+  name = "github.com/Azure/go-ansiterm"
+  packages = [".","winterm"]
+  revision = "19f72df4d05d31cbe1c56bfc8045c96babff6c7e"
+
+[[projects]]
   name = "github.com/Microsoft/go-winio"
   packages = ["."]
   revision = "f533f7a102197536779ea3a8cb881d639e21ec5a"
@@ -21,7 +27,7 @@
 
 [[projects]]
   name = "github.com/docker/docker"
-  packages = ["api/types","api/types/blkiodev","api/types/container","api/types/events","api/types/filters","api/types/mount","api/types/network","api/types/reference","api/types/registry","api/types/strslice","api/types/swarm","api/types/time","api/types/versions","api/types/volume","pkg/stdcopy","pkg/tlsconfig"]
+  packages = ["api/types","api/types/blkiodev","api/types/container","api/types/events","api/types/filters","api/types/mount","api/types/network","api/types/reference","api/types/registry","api/types/strslice","api/types/swarm","api/types/time","api/types/versions","api/types/volume","pkg/jsonlog","pkg/stdcopy","pkg/term","pkg/term/windows","pkg/tlsconfig"]
   revision = "092cba3727bb9b4a2f0e922cd6c0f93ea270e363"
   version = "v1.13.1"
 
@@ -63,7 +69,7 @@
 
 [[projects]]
   name = "github.com/moby/moby"
-  packages = ["client"]
+  packages = ["client","pkg/jsonmessage","pkg/term"]
   revision = "092cba3727bb9b4a2f0e922cd6c0f93ea270e363"
   version = "v1.13.1"
 
@@ -80,6 +86,12 @@
   revision = "feef008d51ad2b3778f85d387ccf91735543008d"
 
 [[projects]]
+  name = "github.com/sirupsen/logrus"
+  packages = ["."]
+  revision = "f006c2ac4710855cf0f916dd6b77acf6b048dc6e"
+  version = "v1.0.3"
+
+[[projects]]
   name = "github.com/src-d/gcfg"
   packages = [".","scanner","token","types"]
   revision = "f187355171c936ac84a82793659ebb4936bc1c23"
@@ -94,7 +106,7 @@
 [[projects]]
   branch = "master"
   name = "golang.org/x/crypto"
-  packages = ["curve25519","ed25519","ed25519/internal/edwards25519","ssh","ssh/agent","ssh/knownhosts"]
+  packages = ["curve25519","ed25519","ed25519/internal/edwards25519","ssh","ssh/agent","ssh/knownhosts","ssh/terminal"]
   revision = "81e90905daefcd6fd217b62423c0908922eadb30"
 
 [[projects]]
@@ -136,6 +148,6 @@
 [solve-meta]
   analyzer-name = "dep"
   analyzer-version = 1
-  inputs-digest = "6788f09a3ddf8d12f9c8417c24e6951b3c2936a8f04678f8c3c5e543b9158d1e"
+  inputs-digest = "0913edbc18dbe2fc36fa992e2beed54ef931a078180f28fe9c8b2ab1204734b5"
   solver-name = "gps-cdcl"
   solver-version = 1
