@@ -9,6 +9,8 @@ import (
 	"runtime/pprof"
 	"sync"
 	"syscall"
+
+	"github.com/pikacloud/gopikacloud"
 )
 
 const (
@@ -29,6 +31,7 @@ var (
 	xhyveTTY          = "~/Library/Containers/com.docker.docker/Data/com.docker.driver.amd64-linux/tty"
 	version           string
 	lock              = sync.RWMutex{}
+	pikacloudClient   *gopikacloud.Client
 )
 
 // PluginConfig describes a plugin option
@@ -90,6 +93,10 @@ func main() {
 
 	if apiToken == "" {
 		log.Fatalln("PIKACLOUD_API_TOKEN is empty")
+	}
+	pikacloudClient = gopikacloud.NewClient(apiToken)
+	if baseURL != "" {
+		pikacloudClient.BaseURL = baseURL
 	}
 	if hostname == "" {
 		h, err := os.Hostname()

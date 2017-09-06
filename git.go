@@ -28,6 +28,7 @@ func (step *TaskStep) Git() error {
 		if errMkdir != nil {
 			return errMkdir
 		}
+		log.Printf("%s cloning in %s", cloneOpts.URL, cloneOpts.Path)
 		repository, errClone := git.PlainClone(cloneOpts.Path, false, &git.CloneOptions{
 			URL:   cloneOpts.URL,
 			Depth: 1,

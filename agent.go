@@ -134,7 +134,7 @@ func (agent *Agent) Ping() error {
 		Localtime:    localtime(),
 	}
 	for t := range runningTerminalsList {
-		opts.RunningTerminals = append(opts.RunningTerminals, t.Task.ID)
+		opts.RunningTerminals = append(opts.RunningTerminals, t.Tid)
 	}
 	status, err := agent.Client.Post(pingURI, opts, nil)
 	if err != nil {

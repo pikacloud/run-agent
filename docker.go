@@ -116,8 +116,8 @@ type DockerRemoveOpts struct {
 
 // DockerTerminalOpts describes docker terminal options
 type DockerTerminalOpts struct {
-	ID   string `json:"id"`
-	Task *Task
+	Cid string `json:"cid"`
+	Tid string `json:"tid"`
 }
 
 // DockerBuildOpts describes docker build options
@@ -287,6 +287,7 @@ func (agent *Agent) dockerRemove(containerID string, opts *DockerRemoveOpts) err
 	return nil
 }
 
+// LogWriter is a type
 type LogWriter log.Logger
 
 func (w *LogWriter) Write(b []byte) (int, error) {
@@ -355,12 +356,18 @@ func (agent *Agent) dockerBuild(opts *DockerBuildOpts) error {
 }
 
 func (agent *Agent) dockerTerminal(opts *DockerTerminalOpts) error {
+	// fetch terminal info from pikacloud API
+	terminal, err := pikacloudClient.Terminal(agent.ID, opts.Tid)
+	if err != nil {
+		return err
+	}
+
 	// connect to websocket
 	quit := false
 	wsURLParams := strings.Split(wsURL, "://")
 	scheme := wsURLParams[0]
 	addr := wsURLParams[1]
-	path := fmt.Sprintf("/_ws/hub/agent/%s:%s:%s:%s", agent.ID, opts.ID, opts.Task.ID)
+	path := fmt.Sprintf("/_ws/hub/agent/%s:%s:%s/", agent.ID, opts.Tid, terminal.Token)
 	u := url.URL{Scheme: scheme, Host: addr, Path: path}
 	log.Printf("connecting to %s", u.String())
 
@@ -382,7 +389,7 @@ func (agent *Agent) dockerTerminal(opts *DockerTerminalOpts) error {
 	}
 	// ctxWithTimeout, ctxCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	// defer ctxCancel()
-	execCreateResponse, err := agent.DockerClient.ContainerExecCreate(ctx, opts.ID, configExec)
+	execCreateResponse, err := agent.DockerClient.ContainerExecCreate(ctx, opts.Cid, configExec)
 	if err != nil {
 		return err
 	}
@@ -522,7 +529,7 @@ func (agent *Agent) dockerTerminal(opts *DockerTerminalOpts) error {
 		execAttachResponse.Close()
 		log.Printf("Exec session %s closed", execCreateResponse.ID)
 		c.Close()
-		log.Printf("Websocket connection closed %s", opts.Task.ID)
+		log.Printf("Websocket connection closed %s", opts.Tid)
 		delete(runningTerminalsList, opts)
 		return
 
@@ -1038,11 +1045,12 @@ func (step *TaskStep) Docker() error {
 		}
 		return nil
 	case "terminal":
-		var terminalOpts = DockerTerminalOpts{Task: step.Task}
+		var terminalOpts = DockerTerminalOpts{}
 		err := json.Unmarshal([]byte(step.PluginConfig), &terminalOpts)
 		if err != nil {
 			return fmt.Errorf("Bad config for docker terminal: %s (%v)", err, step.PluginConfig)
 		}
+		terminalOpts.Tid = step.Task.ID
 		err = agent.dockerTerminal(&terminalOpts)
 		if err != nil {
 			return err
