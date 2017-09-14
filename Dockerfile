@@ -1,6 +1,6 @@
 FROM golang:alpine
 
-RUN apk -U add make git gcc
+RUN apk -U add make git gcc dev86
 
 COPY . /go/src/github.com/pikacloud/run-agent
 WORKDIR /go/src/github.com/pikacloud/run-agent
