@@ -65,6 +65,11 @@
 # source = "https://github.com/myfork/package.git"
 
 [[override]]
+  name = "gopkg.in/src-d/go-git.v4"
+	source = "https://github.com/src-d/go-git.git"
+  revision = "v4.0.0-rc15"
+
+[[override]]
   branch = "master"
   name = "github.com/Azure/go-ansiterm"
 	source = "https://github.com/bjorand/go-ansiterm.git"
