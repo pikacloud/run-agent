@@ -101,7 +101,7 @@ func (task *Task) streaming() error {
 	c, _, err := dialer.Dial(u.String(), nil)
 	task.websocketConn = c
 	if err != nil {
-		return fmt.Errorf("dial:%s", err)
+		return fmt.Errorf("Error dialing %s: %s%s", wsURL, path, err)
 	}
 	log.Printf("Task %s connected to %s", task.ID, u.String())
 	go func() {

@@ -418,7 +418,7 @@ func (agent *Agent) dockerTerminal(opts *DockerTerminalOpts) error {
 	dialer.HandshakeTimeout = 3 * time.Second
 	c, _, err := dialer.Dial(u.String(), nil)
 	if err != nil {
-		return fmt.Errorf("dial:%s", err)
+		return fmt.Errorf("Error dialing %s%s: %s", wsURL, path, err)
 	}
 	ctx := context.Background()
 	configExec := docker_types.ExecConfig{
