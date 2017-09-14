@@ -26,7 +26,7 @@ var (
 	cpuprofile        = flag.String("cpuprofile", "", "write cpu profile to file")
 	showVersion       = flag.Bool("version", false, "show version")
 	showLatestVersion = flag.Bool("latest", false, "show latest version available")
-	wsURL             = "ws://ws.pikacloud.com"
+	wsURL             = "wss://ws.pikacloud.com"
 	isXhyve           = false
 	xhyveTTY          = "~/Library/Containers/com.docker.docker/Data/com.docker.driver.amd64-linux/tty"
 	version           string
