@@ -13,7 +13,7 @@ import (
 // Tar takes a source and variable writers and walks 'source' writing each file
 // found to the tar writer; the purpose for accepting multiple writers is to allow
 // for multiple outputs (for example a file, or md5 hash)
-func Tar(src string, gz bool, writer io.Writer) error {
+func Tar(src string, gz bool, writer io.Writer, progress io.Writer) error {
 
 	// ensure the src actually exists before trying to tar it
 	if _, err := os.Stat(src); err != nil {
@@ -31,9 +31,19 @@ func Tar(src string, gz bool, writer io.Writer) error {
 
 	}
 	defer tw.Close()
-
+	filesCount := 0
+	filepath.Walk(src, func(file string, fi os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		filesCount++
+		return nil
+	})
+	var currentProgress float64
 	// walk path
 	return filepath.Walk(src, func(file string, fi os.FileInfo, err error) error {
+		currentProgress++
+		progress.Write([]byte(fmt.Sprintf("\r%d%%", int(currentProgress/float64(filesCount)*100))))
 		// return on any error
 		if err != nil {
 			return err

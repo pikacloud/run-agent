@@ -13,14 +13,13 @@ func TestNewClient(t *testing.T) {
 }
 
 func TestDeleteRunningTasks(t *testing.T) {
-	runningTasksList = append(runningTasksList, "t1", "t2")
+	runningTasksList = make(map[string]*Task)
+	runningTasksList["t1"] = &Task{}
+	runningTasksList["t2"] = &Task{}
 	deleteRunningTasks("t1")
-	for _, task := range runningTasksList {
-		if task == "t1" {
-			t.Errorf("t1 found in %v", runningTasksList)
-		}
+	if runningTasksList["t1"] != nil {
+		t.Errorf("t1 found in %v", runningTasksList)
 	}
-
 }
 
 func TestPluralize(t *testing.T) {

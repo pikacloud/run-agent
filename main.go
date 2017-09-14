@@ -21,12 +21,12 @@ const (
 
 var (
 	agent             *Agent
-	runningTasksList  []string
+	runningTasksList  map[string]*Task
 	metrics           *Metrics
 	cpuprofile        = flag.String("cpuprofile", "", "write cpu profile to file")
 	showVersion       = flag.Bool("version", false, "show version")
 	showLatestVersion = flag.Bool("latest", false, "show latest version available")
-	wsURL             = "ws.pikacloud.com"
+	wsURL             = "ws://ws.pikacloud.com"
 	isXhyve           = false
 	xhyveTTY          = "~/Library/Containers/com.docker.docker/Data/com.docker.driver.amd64-linux/tty"
 	version           string
@@ -50,6 +50,7 @@ func shutdown() {
 }
 
 func main() {
+	runningTasksList = make(map[string]*Task)
 	metrics = &Metrics{}
 	killchan := make(chan os.Signal, 2)
 	signal.Notify(killchan, syscall.SIGINT, syscall.SIGTERM)

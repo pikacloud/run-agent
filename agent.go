@@ -128,9 +128,13 @@ func (agent *Agent) infinitePing() {
 // Ping agent
 func (agent *Agent) Ping() error {
 	pingURI := fmt.Sprintf("run/agents/%s/ping/", agent.ID)
+	flatRunningTasksList := make([]string, 0, len(runningTasksList))
+	for k := range runningTasksList {
+		flatRunningTasksList = append(flatRunningTasksList, k)
+	}
 	opts := PingAgentOptions{
 		Metrics:      metrics,
-		RunningTasks: runningTasksList,
+		RunningTasks: flatRunningTasksList,
 		Localtime:    localtime(),
 	}
 	for t := range runningTerminalsList {
@@ -171,9 +175,12 @@ func (agent *Agent) infinitePullTasks() {
 			log.Printf("Got %d new tasks %s", len(tasks), strings.Join(tasksID, ", "))
 		}
 		for _, task := range tasks {
+			task.cancelCh = make(chan bool)
 			if task.NeedACK {
 				lock.RLock()
-				runningTasksList = append(runningTasksList, task.ID)
+				// runningTasksList = append(runningTasksList, task.ID)
+				fmt.Println(runningTasksList)
+				runningTasksList[task.ID] = task
 				lock.RUnlock()
 			}
 			go func(t *Task) {

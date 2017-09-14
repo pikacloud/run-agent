@@ -28,7 +28,6 @@ import (
 	"github.com/gorilla/websocket"
 	docker_client "github.com/moby/moby/client"
 	"github.com/moby/moby/pkg/jsonmessage"
-	"github.com/moby/moby/pkg/term"
 )
 
 // DockerPorts describes docker ports for docker run
@@ -125,6 +124,7 @@ type DockerBuildOpts struct {
 	Tag           string `json:"tag"`
 	Path          string `json:"path"`
 	ClearBuildDir bool   `json:"clear_build_dir"`
+	BuildID       string `json:"build_id"`
 }
 
 var (
@@ -295,11 +295,7 @@ func (w *LogWriter) Write(b []byte) (int, error) {
 	return len(b), nil
 }
 
-func (agent *Agent) dockerBuild(opts *DockerBuildOpts) error {
-	// create tarball of src
-	// var buf bytes.Buffer
-	// writer := io.Writer(&buf)
-
+func (step *TaskStep) dockerBuild(opts *DockerBuildOpts) error {
 	var writer io.WriteCloser
 	tarFileName := fmt.Sprintf("%s.tar", opts.Path)
 	writer, err := os.Create(tarFileName)
@@ -307,8 +303,10 @@ func (agent *Agent) dockerBuild(opts *DockerBuildOpts) error {
 		return err
 	}
 	defer writer.Close()
+	defer os.RemoveAll(opts.Path)
+	step.stream("Sending build context to Docker daemon\n")
 	log.Printf("Writing image %s tarball to %s", opts.Tag, tarFileName)
-	errTar := Tar(opts.Path, false, writer)
+	errTar := Tar(opts.Path, false, writer, step.Task.LogWriter)
 	if errTar != nil {
 		return errTar
 	}
@@ -316,41 +314,86 @@ func (agent *Agent) dockerBuild(opts *DockerBuildOpts) error {
 	if err != nil {
 		return err
 	}
+	step.stream("\n")
 	defer dockerBuildContext.Close()
-	// defer os.RemoveAll(opts.Path)
+	defer os.RemoveAll(opts.Path)
+	defer os.Remove(tarFileName)
+	// wsURLParams := strings.Split(wsURL, "://")
+	// scheme := wsURLParams[0]
+	// addr := wsURLParams[1]
+	// path := fmt.Sprintf("/_ws/hub/log-writer/image-build:%s/", opts.Task.ID)
+	// u := url.URL{Scheme: scheme, Host: addr, Path: path}
+	// log.Printf("connecting to %s", u.String())
+	//
+	// dialer := websocket.DefaultDialer
+	// dialer.HandshakeTimeout = 3 * time.Second
+	// c, _, err := dialer.Dial(u.String(), nil)
+	// if err != nil {
+	// 	return fmt.Errorf("dial:%s", err)
+	// }
+	// defer func() {
+	// 	log.Printf("Closing connection with %s", c.RemoteAddr())
+	// 	c.Close()
+	// }()
 	log.Printf("Building image %s", opts.Tag)
 	buildOpts := docker_types.ImageBuildOptions{
 		NoCache:    true,
 		Dockerfile: "Dockerfile",
 		Tags:       []string{opts.Tag},
+		Remove:     true,
 	}
-	ctx := context.Background()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	buildResponse, err := agent.DockerClient.ImageBuild(ctx, dockerBuildContext, buildOpts)
 	if err != nil {
 		return err
 	}
 	defer buildResponse.Body.Close()
-	log.Printf("Image %s built", opts.Tag)
-	logBuff := os.Stdout
-	outFd, isTerminalOut := term.GetFdInfo(os.Stdout)
-	// w := l.OutWriter()
-	// if w != nil {
-	// 	outFd, isTerminalOut = term.GetFdInfo(w)
-	// }
-	// logBuff = io.Writer{}
-	// TODO: write message to our websocket server
-	err = jsonmessage.DisplayJSONMessagesStream(buildResponse.Body, logBuff, outFd, isTerminalOut, nil)
-	if err != nil {
-		if jerr, ok := err.(*jsonmessage.JSONError); ok {
-			// If no error code is set, default to 1
-			if jerr.Code == 0 {
-				jerr.Code = 1
+	// go func() {
+	// 	defer func() {
+	// 		c.Close()
+	// 	}()
+	// 	for {
+	// 		_, _, err := c.NextReader()
+	// 		if err != nil {
+	// 			return
+	// 		}
+	// 	}
+	// }()
+	buf := make([]byte, 1024)
+	for {
+		select {
+		case <-step.Task.cancelCh:
+			return fmt.Errorf("Docker build cancelled")
+		default:
+		}
+		read, err := buildResponse.Body.Read(buf)
+		if err != nil {
+			return err
+		}
+		if read > 0 {
+			j := jsonmessage.JSONMessage{}
+			err := json.Unmarshal([]byte(buf[:read]), &j)
+			if err != nil {
+				continue
 			}
-			// errBuff.Write([]byte(jerr.Error()))
-			fmt.Println([]byte(jerr.Error()))
-			return fmt.Errorf("Status: %s, Code: %d", jerr.Message, jerr.Code)
+			step.stream(j.Stream)
+			// c.WriteMessage(websocket.BinaryMessage, []byte(fmt.Sprintf("%s", j.Stream)))
 		}
 	}
+	log.Printf("Image %s built", opts.Tag)
+
+	// err = jsonmessage.DisplayJSONMessagesStream(buildResponse.Body, logBuff, outFd, isTerminalOut, nil)
+	// if err != nil {
+	// 	if jerr, ok := err.(*jsonmessage.JSONError); ok {
+	// 		// If no error code is set, default to 1
+	// 		if jerr.Code == 0 {
+	// 			jerr.Code = 1
+	// 		}
+	// 		// errBuff.Write([]byte(jerr.Error()))
+	// 		fmt.Println([]byte(jerr.Error()))
+	// 		return fmt.Errorf("Status: %s, Code: %d", jerr.Message, jerr.Code)
+	// 	}
 	// push image
 	return nil
 }
@@ -391,7 +434,7 @@ func (agent *Agent) dockerTerminal(opts *DockerTerminalOpts) error {
 	// defer ctxCancel()
 	execCreateResponse, err := agent.DockerClient.ContainerExecCreate(ctx, opts.Cid, configExec)
 	if err != nil {
-		return err
+		return fmt.Errorf("Cannot create container %s exec %+v: %s", opts.Cid, configExec, err)
 	}
 	// configStart := docker_types.ExecStartCheck{
 	// 	Detach: configExec.Detach,
@@ -621,7 +664,7 @@ func (agent *Agent) dockerTerminal(opts *DockerTerminalOpts) error {
 				return
 			}
 			buf := make([]byte, 1024)
-			read, _ := execAttachResponse.Conn.Read(buf)
+			read, err := execAttachResponse.Conn.Read(buf)
 			if err != nil {
 				c.WriteMessage(websocket.TextMessage, []byte(err.Error()))
 				fmt.Printf("Unable to read from pty/cmd")
@@ -973,7 +1016,7 @@ func (step *TaskStep) Docker() error {
 		if err != nil {
 			return fmt.Errorf("Bad config for docker build: %s (%v)", err, step.PluginConfig)
 		}
-		err = agent.dockerBuild(&buildOpts)
+		err = step.dockerBuild(&buildOpts)
 		if err != nil {
 			return err
 		}
