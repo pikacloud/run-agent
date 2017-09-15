@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"reflect"
 	"runtime"
 	"strconv"
@@ -23,10 +24,16 @@ import (
 	docker_types_container "github.com/docker/docker/api/types/container"
 	docker_types_event "github.com/docker/docker/api/types/events"
 	docker_types_network "github.com/docker/docker/api/types/network"
-	"github.com/docker/docker/api/types/strslice"
+	docker_types_strslice "github.com/docker/docker/api/types/strslice"
+	"github.com/docker/docker/pkg/progress"
+	"github.com/docker/docker/pkg/streamformatter"
 	docker_nat "github.com/docker/go-connections/nat"
 	"github.com/gorilla/websocket"
+	"github.com/moby/moby/builder"
+	"github.com/moby/moby/builder/dockerignore"
 	docker_client "github.com/moby/moby/client"
+	"github.com/moby/moby/pkg/archive"
+	"github.com/moby/moby/pkg/fileutils"
 	"github.com/moby/moby/pkg/jsonmessage"
 )
 
@@ -199,10 +206,10 @@ func (agent *Agent) dockerCreate(opts *DockerCreateOpts) (*docker_types_containe
 		config.WorkingDir = opts.WorkingDir
 	}
 	if opts.Entrypoint != "" {
-		config.Entrypoint = strslice.StrSlice{opts.Entrypoint}
+		config.Entrypoint = docker_types_strslice.StrSlice{opts.Entrypoint}
 	}
 	if opts.Command != "" {
-		config.Cmd = strslice.StrSlice{opts.Command}
+		config.Cmd = docker_types_strslice.StrSlice{opts.Command}
 	}
 	natPortmap := docker_nat.PortMap{}
 	for _, p := range opts.Ports {
@@ -295,71 +302,81 @@ func (w *LogWriter) Write(b []byte) (int, error) {
 	return len(b), nil
 }
 
+// ReadDockerignore reads the .dockerignore file in the context directory and
+// returns the list of paths to exclude
+func ReadDockerignore(contextDir string) ([]string, error) {
+	var excludes []string
+
+	f, err := os.Open(filepath.Join(contextDir, ".dockerignore"))
+	switch {
+	case os.IsNotExist(err):
+		return excludes, nil
+	case err != nil:
+		return nil, err
+	}
+	defer f.Close()
+
+	return dockerignore.ReadAll(f)
+}
+
+// TrimBuildFilesFromExcludes removes the named Dockerfile and .dockerignore from
+// the list of excluded files. The daemon will remove them from the final context
+// but they must be in available in the context when passed to the API.
+func TrimBuildFilesFromExcludes(excludes []string, dockerfile string, dockerfileFromStdin bool) []string {
+	if keep, _ := fileutils.Matches(".dockerignore", excludes); keep {
+		excludes = append(excludes, "!.dockerignore")
+	}
+	if keep, _ := fileutils.Matches(dockerfile, excludes); keep && !dockerfileFromStdin {
+		excludes = append(excludes, "!"+dockerfile)
+	}
+	return excludes
+}
+
+// IDPair is a UID and GID pair
+type IDPair struct {
+	UID int
+	GID int
+}
+
 func (step *TaskStep) dockerBuild(opts *DockerBuildOpts) error {
-	var writer io.WriteCloser
-	tarFileName := fmt.Sprintf("%s.tar", opts.Path)
-	writer, err := os.Create(tarFileName)
-	if err != nil {
-		return err
-	}
-	defer writer.Close()
 	defer os.RemoveAll(opts.Path)
-	step.stream("Sending build context to Docker daemon\n")
-	log.Printf("Writing image %s tarball to %s", opts.Tag, tarFileName)
-	errTar := Tar(opts.Path, false, writer, step.Task.LogWriter)
-	if errTar != nil {
-		return errTar
-	}
-	dockerBuildContext, err := os.Open(tarFileName)
-	if err != nil {
-		return err
-	}
-	step.stream("\n")
-	defer dockerBuildContext.Close()
-	defer os.RemoveAll(opts.Path)
-	defer os.Remove(tarFileName)
-	// wsURLParams := strings.Split(wsURL, "://")
-	// scheme := wsURLParams[0]
-	// addr := wsURLParams[1]
-	// path := fmt.Sprintf("/_ws/hub/log-writer/image-build:%s/", opts.Task.ID)
-	// u := url.URL{Scheme: scheme, Host: addr, Path: path}
-	// log.Printf("connecting to %s", u.String())
-	//
-	// dialer := websocket.DefaultDialer
-	// dialer.HandshakeTimeout = 3 * time.Second
-	// c, _, err := dialer.Dial(u.String(), nil)
-	// if err != nil {
-	// 	return fmt.Errorf("dial:%s", err)
-	// }
-	// defer func() {
-	// 	log.Printf("Closing connection with %s", c.RemoteAddr())
-	// 	c.Close()
-	// }()
 	log.Printf("Building image %s", opts.Tag)
-	buildOpts := docker_types.ImageBuildOptions{
-		NoCache:    true,
-		Dockerfile: "Dockerfile",
-		Tags:       []string{opts.Tag},
-		Remove:     true,
-	}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	buildResponse, err := agent.DockerClient.ImageBuild(ctx, dockerBuildContext, buildOpts)
+	contextDir, relDockerfile, err := builder.GetContextFromLocalDir(opts.Path, fmt.Sprintf("%s/%s", opts.Path, "Dockerfile"))
+	if err != nil {
+		return fmt.Errorf("unable to prepare context: %s", err)
+	}
+	relDockerfile, err = archive.CanonicalTarNameForPath(relDockerfile)
+	if err != nil {
+		return fmt.Errorf("cannot canonicalize dockerfile path %s: %v", relDockerfile, err)
+	}
+	excludes, err := ReadDockerignore(opts.Path)
+	excludes = TrimBuildFilesFromExcludes(excludes, relDockerfile, false)
+	tarOptions := &archive.TarOptions{
+		ExcludePatterns: excludes,
+		ChownOpts:       &archive.TarChownOptions{UID: 0, GID: 0},
+	}
+	buildCtx, err := archive.TarWithOptions(contextDir, tarOptions)
+	if err != nil {
+		return err
+	}
+	defer buildCtx.Close()
+	var body io.Reader
+	progressOutput := streamformatter.NewStreamFormatter().NewProgressOutput(step.Task.LogWriter, true)
+	body = progress.NewProgressReader(buildCtx, progressOutput, 0, "", "Sending build context to Docker daemon")
+	buildOpts := docker_types.ImageBuildOptions{
+		NoCache:    true,
+		Dockerfile: relDockerfile,
+		Tags:       []string{opts.Tag},
+		Remove:     true,
+		PullParent: true,
+	}
+	buildResponse, err := agent.DockerClient.ImageBuild(ctx, body, buildOpts)
 	if err != nil {
 		return err
 	}
 	defer buildResponse.Body.Close()
-	// go func() {
-	// 	defer func() {
-	// 		c.Close()
-	// 	}()
-	// 	for {
-	// 		_, _, err := c.NextReader()
-	// 		if err != nil {
-	// 			return
-	// 		}
-	// 	}
-	// }()
 	buf := make([]byte, 1024)
 	for {
 		select {
@@ -369,6 +386,9 @@ func (step *TaskStep) dockerBuild(opts *DockerBuildOpts) error {
 		}
 		read, err := buildResponse.Body.Read(buf)
 		if err != nil {
+			if err == io.EOF {
+				break
+			}
 			return err
 		}
 		if read > 0 {
@@ -378,23 +398,9 @@ func (step *TaskStep) dockerBuild(opts *DockerBuildOpts) error {
 				continue
 			}
 			step.stream(j.Stream)
-			// c.WriteMessage(websocket.BinaryMessage, []byte(fmt.Sprintf("%s", j.Stream)))
 		}
 	}
 	log.Printf("Image %s built", opts.Tag)
-
-	// err = jsonmessage.DisplayJSONMessagesStream(buildResponse.Body, logBuff, outFd, isTerminalOut, nil)
-	// if err != nil {
-	// 	if jerr, ok := err.(*jsonmessage.JSONError); ok {
-	// 		// If no error code is set, default to 1
-	// 		if jerr.Code == 0 {
-	// 			jerr.Code = 1
-	// 		}
-	// 		// errBuff.Write([]byte(jerr.Error()))
-	// 		fmt.Println([]byte(jerr.Error()))
-	// 		return fmt.Errorf("Status: %s, Code: %d", jerr.Message, jerr.Code)
-	// 	}
-	// push image
 	return nil
 }
 

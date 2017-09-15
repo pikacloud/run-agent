@@ -80,6 +80,12 @@ func (step *TaskStep) Do() error {
 	}
 }
 
+func (step *TaskStep) streamErr(msg string) {
+	if step.Task.Stream {
+		step.Task.LogWriter.Write([]byte(fmt.Sprintf("\033[0;31m%s\033[0m", msg)))
+	}
+}
+
 func (step *TaskStep) stream(msg string) {
 	if step.Task.Stream {
 		step.Task.LogWriter.Write([]byte(msg))
@@ -168,6 +174,9 @@ func (task *Task) Do() error {
 			log.Printf("%s Step %s failed with config %s (%s)", step.Plugin, step.Method, step.PluginConfig, err)
 			ackStep.Message = err.Error()
 			ackStep.Success = false
+			if step.Task.Stream {
+				step.streamErr(ackStep.Message + "\n")
+			}
 			ackStep.EndTimestamp = time.Now().Unix()
 			if step.ExitOnFailure {
 				ack.TaskACKStep = append(ack.TaskACKStep, &ackStep)

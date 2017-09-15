@@ -7,8 +7,8 @@ import (
 	"log"
 
 	docker_types "github.com/docker/docker/api/types"
-	"github.com/docker/docker/pkg/stdcopy"
 	"github.com/gorilla/websocket"
+	"github.com/moby/moby/pkg/stdcopy"
 )
 
 // WSReaderWriter uses
