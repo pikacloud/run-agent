@@ -35,8 +35,8 @@
 [[projects]]
   name = "github.com/docker/docker"
   packages = ["api/types","api/types/backend","api/types/blkiodev","api/types/container","api/types/events","api/types/filters","api/types/mount","api/types/network","api/types/reference","api/types/registry","api/types/strslice","api/types/swarm","api/types/time","api/types/versions","api/types/volume","builder/dockerignore","daemon/graphdriver","image","image/v1","layer","oci","pkg/archive","pkg/chrootarchive","pkg/fileutils","pkg/gitutils","pkg/httputils","pkg/idtools","pkg/ioutils","pkg/jsonlog","pkg/jsonmessage","pkg/longpath","pkg/mount","pkg/plugingetter","pkg/plugins","pkg/plugins/transport","pkg/pools","pkg/progress","pkg/promise","pkg/random","pkg/reexec","pkg/streamformatter","pkg/stringid","pkg/symlink","pkg/system","pkg/tarsum","pkg/term","pkg/term/windows","pkg/tlsconfig","pkg/urlutil","plugin/v2","reference"]
-  revision = "092cba3727bb9b4a2f0e922cd6c0f93ea270e363"
-  version = "v1.13.1"
+  revision = "eef6495eddab52828327aade186443681ed71a4e"
+  version = "v17.03.2-ce-rc1"
 
 [[projects]]
   branch = "master"
@@ -107,8 +107,7 @@
 [[projects]]
   name = "github.com/opencontainers/runtime-spec"
   packages = ["specs-go"]
-  revision = "02137cd4e50b37a01665e1731fcd4ac2d2178230"
-  version = "v1.0.0"
+  revision = "1c7c27d043c2a5e513a44084d2b10d77d1402b8c"
 
 [[projects]]
   branch = "master"
@@ -203,6 +202,6 @@
 [solve-meta]
   analyzer-name = "dep"
   analyzer-version = 1
-  inputs-digest = "b0bb4a65c446166e1681bcfbfcee092c2f0589bb7398e34acb6df375f03857a2"
+  inputs-digest = "fdd6048c95f8150ba94938ac17f2358401e5f53824406f2cad896bc3823268d7"
   solver-name = "gps-cdcl"
   solver-version = 1

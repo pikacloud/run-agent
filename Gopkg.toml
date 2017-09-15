@@ -70,6 +70,10 @@
   revision = "v4.0.0-rc15"
 
 [[override]]
+  name = "github.com/docker/docker"
+  version = "v17.03.2-ce"
+
+[[override]]
   branch = "master"
   name = "github.com/Azure/go-ansiterm"
 	source = "https://github.com/bjorand/go-ansiterm.git"
@@ -82,3 +86,7 @@
 [[constraint]]
   name = "github.com/moby/moby"
   version = "v17.03.2-ce"
+
+[[override]]
+  name = "github.com/opencontainers/runtime-spec"
+  revision = "1c7c27d043c2a5e513a44084d2b10d77d1402b8c"
