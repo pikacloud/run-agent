@@ -143,6 +143,7 @@ func (task *Task) streaming() error {
 // Do a task
 func (task *Task) Do() error {
 	defer close(task.cancelCh)
+	defer deleteRunningTasks(task.ID)
 	ack := TaskACK{}
 	alreadyAcked := false
 	if task.Stream {
@@ -203,6 +204,5 @@ func (task *Task) Do() error {
 			log.Printf("task %s ACKed", task.ID)
 		}
 	}
-	deleteRunningTasks(task.ID)
 	return nil
 }

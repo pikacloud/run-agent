@@ -46,6 +46,7 @@ func pluralize(n int) string {
 }
 
 func shutdown() {
+	log.Println("Shutting down run-agent...")
 	os.Exit(0)
 }
 

@@ -63,6 +63,12 @@
   version = "v1.2.0"
 
 [[projects]]
+  branch = "master"
+  name = "github.com/google/shlex"
+  packages = ["."]
+  revision = "6f45313302b9c56850fc17f99e40caebce98c716"
+
+[[projects]]
   name = "github.com/gorilla/context"
   packages = ["."]
   revision = "1ea25387ff6f684839d82767c1733ff4d4d15d0a"
@@ -202,6 +208,6 @@
 [solve-meta]
   analyzer-name = "dep"
   analyzer-version = 1
-  inputs-digest = "fdd6048c95f8150ba94938ac17f2358401e5f53824406f2cad896bc3823268d7"
+  inputs-digest = "113c0bc2104495500a5eac2fa2e850fee560f20d13b14041dff433a2ff264fb5"
   solver-name = "gps-cdcl"
   solver-version = 1

@@ -28,6 +28,7 @@ import (
 	"github.com/docker/docker/pkg/progress"
 	"github.com/docker/docker/pkg/streamformatter"
 	docker_nat "github.com/docker/go-connections/nat"
+	"github.com/google/shlex"
 	"github.com/gorilla/websocket"
 	"github.com/moby/moby/builder"
 	"github.com/moby/moby/builder/dockerignore"
@@ -209,7 +210,11 @@ func (agent *Agent) dockerCreate(opts *DockerCreateOpts) (*docker_types_containe
 		config.Entrypoint = docker_types_strslice.StrSlice{opts.Entrypoint}
 	}
 	if opts.Command != "" {
-		config.Cmd = docker_types_strslice.StrSlice{opts.Command}
+		s, err := shlex.Split(opts.Command)
+		if err != nil {
+			return nil, err
+		}
+		config.Cmd = s
 	}
 	natPortmap := docker_nat.PortMap{}
 	for _, p := range opts.Ports {
