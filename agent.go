@@ -2,9 +2,9 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log"
+	"runtime"
 	"strings"
 	"time"
 
@@ -77,8 +77,6 @@ func (agent *Agent) Register() error {
 	if len(agent.Labels) > 0 {
 		opt.Labels = agent.Labels
 	}
-	j, _ := json.Marshal(opt)
-	fmt.Println(agent.Labels, len(agent.Labels), string(j))
 	status, err := agent.Client.Post("run/agents/", opt, &agent)
 	if err != nil {
 		return err
@@ -147,7 +145,8 @@ func (agent *Agent) Ping() error {
 	if status != 200 {
 		return fmt.Errorf("ping to %s returns %d codes", pingURI, status)
 	}
-	log.Printf("Ping OK (%d running task%s, %d running terminal%s)", len(opts.RunningTasks), pluralize(len(opts.RunningTasks)), len(opts.RunningTerminals), pluralize(len(opts.RunningTerminals)))
+	nbGoroutines := runtime.NumGoroutine()
+	log.Printf("Ping OK (%d running task%s, %d running terminal%s, %d goroutine%s", len(opts.RunningTasks), pluralize(len(opts.RunningTasks)), len(opts.RunningTerminals), pluralize(len(opts.RunningTerminals)), nbGoroutines, pluralize(nbGoroutines))
 	return nil
 }
 

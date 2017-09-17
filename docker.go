@@ -689,7 +689,6 @@ func (agent *Agent) dockerTerminal(opts *DockerTerminalOpts) error {
 		if quit {
 			return nil
 		}
-		log.Println("UP")
 		data, errD := agent.DockerClient.ContainerExecInspect(ctx, execCreateResponse.ID)
 		if errD != nil {
 			quit = true
