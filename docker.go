@@ -966,19 +966,33 @@ func (agent *Agent) parseDockerEvent(msg docker_types_event.Message) error {
 	return nil
 }
 
-func (agent *Agent) listenDockerEvents() error {
-	events, errs := agent.DockerClient.Events(context.Background(), docker_types.EventsOptions{})
+func waitDockerEvents(events <-chan docker_types_event.Message, errs <-chan error) error {
 	for {
 		select {
 		case dMsg := <-events:
 			err := agent.parseDockerEvent(dMsg)
 			if err != nil {
-				log.Println(err)
+				return err
 			}
 		case dErr := <-errs:
 			if dErr != nil {
-				fmt.Println(dErr)
+				return dErr
 			}
+		}
+	}
+	return nil
+}
+
+func (agent *Agent) listenDockerEvents() error {
+	ctx := context.Background()
+	//messages := make(chan events.Message)
+	//errs := make(chan error, 1)
+	for {
+		events, errs := agent.DockerClient.Events(ctx, docker_types.EventsOptions{})
+		err := waitDockerEvents(events, errs)
+		if err != nil {
+			log.Printf("Error reading docker events: %s", err)
+			time.Sleep(3 * time.Second)
 		}
 	}
 }
@@ -1008,6 +1022,7 @@ func (step *TaskStep) Docker() error {
 		if err := agent.dockerStart(containerCreated.ID); err != nil {
 			return err
 		}
+
 		return nil
 	case "pull":
 		var pullOpts = DockerPullOpts{}

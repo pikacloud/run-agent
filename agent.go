@@ -146,7 +146,7 @@ func (agent *Agent) Ping() error {
 		return fmt.Errorf("ping to %s returns %d codes", pingURI, status)
 	}
 	nbGoroutines := runtime.NumGoroutine()
-	log.Printf("Ping OK (%d running task%s, %d running terminal%s, %d goroutine%s", len(opts.RunningTasks), pluralize(len(opts.RunningTasks)), len(opts.RunningTerminals), pluralize(len(opts.RunningTerminals)), nbGoroutines, pluralize(nbGoroutines))
+	log.Printf("Ping OK (%d running task%s, %d running terminal%s, %d goroutine%s)", len(opts.RunningTasks), pluralize(len(opts.RunningTasks)), len(opts.RunningTerminals), pluralize(len(opts.RunningTerminals)), nbGoroutines, pluralize(nbGoroutines))
 	return nil
 }
 
