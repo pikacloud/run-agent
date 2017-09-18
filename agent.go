@@ -177,8 +177,6 @@ func (agent *Agent) infinitePullTasks() {
 			task.cancelCh = make(chan bool)
 			if task.NeedACK {
 				lock.RLock()
-				// runningTasksList = append(runningTasksList, task.ID)
-				fmt.Println(runningTasksList)
 				runningTasksList[task.ID] = task
 				lock.RUnlock()
 			}
