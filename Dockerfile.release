@@ -1,0 +1,5 @@
+FROM golang:alpine
+COPY run-agent /go/bin
+WORKDIR /go/bin
+CMD run-agent -auto
+
