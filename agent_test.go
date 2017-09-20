@@ -8,6 +8,7 @@ import (
 )
 
 func createTestAgent() error {
+	version = "undefined"
 	safeLocaltime := localtime()
 	mux.HandleFunc("/v1/run/agents/", func(w http.ResponseWriter, r *http.Request) {
 		testMethod(nil, r, "POST")
@@ -85,21 +86,20 @@ func TestAgentPing(t *testing.T) {
 func TestAgentLatestVersion(t *testing.T) {
 	setup()
 	defer teardown()
-
-	mux.HandleFunc("/v1/run/agent-version/", func(w http.ResponseWriter, r *http.Request) {
+	// testURI := fmt.Sprintf("/v1/run/agent_version/latest/?from=%s&os=%s&arch=%s", version, runtime.GOOS, runtime.GOARCH)
+	mux.HandleFunc("/v1/run/agent_version/latest/", func(w http.ResponseWriter, r *http.Request) {
 		testMethod(t, r, "GET")
-		fmt.Fprint(w, `{"version": "1.0.0"}`)
+		fmt.Fprint(w, `{"version": "1.0.1", "archive_url":"http://foo.bar/agent.zip"}`)
 	})
-
 	err := createTestAgent()
 	if err != nil {
 		t.Errorf("Cannot create agent: %v", err)
 	}
-	v, err := agent.latestVersion()
+	v, err := agent.getLatestVersion()
 	if err != nil {
 		t.Errorf("Cannot fetch latest version %+v", err)
 	}
-	if v != "1.0.0" {
-		t.Errorf("Version is %v, want %v", v, "1.0.0")
+	if v.Version != "1.0.1" {
+		t.Errorf("Version is %v, want %v", v.Version, "1.0.1")
 	}
 }

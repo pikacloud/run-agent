@@ -30,7 +30,7 @@ func (step *TaskStep) System() error {
 		}
 		return nil
 	case "shutdown":
-		shutdown()
+		shutdown(0)
 		return nil
 	default:
 		return fmt.Errorf("Unknown step method %s", step.Method)

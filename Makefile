@@ -1,5 +1,6 @@
 VERSION := $(shell cat VERSION)
-BUILDFLAGS := -ldflags "-X main.version=$(VERSION)"
+GIT_REF := $(shell git rev-parse --short HEAD || echo unsupported)
+BUILDFLAGS := -ldflags "-X main.version=$(VERSION) -X main.gitRef=$(GIT_REF)"
 
 test:
 	go test -v

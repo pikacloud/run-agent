@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	update "github.com/inconshreveable/go-update"
 	docker_client "github.com/moby/moby/client"
 )
 
@@ -86,21 +87,6 @@ func (agent *Agent) Register() error {
 	}
 	log.Printf("Agent %s registered with hostname %s (agent version %s)\n", agent.ID, agent.Hostname, version)
 	return nil
-}
-
-// AgentLatestVersion represents the latest agent version available
-type AgentLatestVersion struct {
-	Version string `json:"version"`
-}
-
-// lastVersion checks the latest run-agent available
-func (agent *Agent) latestVersion() (string, error) {
-	version := AgentLatestVersion{}
-	err := agent.Client.Get("run/agent-version/", &version)
-	if err != nil {
-		return "", err
-	}
-	return version.Version, nil
 }
 
 func (agent *Agent) infinitePing() {
@@ -202,4 +188,47 @@ func (agent *Agent) pullTasks() ([]*Task, error) {
 		return nil, err
 	}
 	return tasks, nil
+}
+
+type versionUpdate struct {
+	Version         string `json:"version"`
+	Os              string `json:"os"`
+	Arch            string `json:"arch"`
+	ArchiveURL      string `json:"archive_url"`
+	ArchiveChecksum string `json:"archive_checksum"`
+}
+
+func (agent *Agent) getLatestVersion() (*versionUpdate, error) {
+	// versionURI := fmt.Sprintf("run/agent_version/latest", version, runtime.GOOS, runtime.GOARCH)
+	v := &versionUpdate{}
+	err := agent.Client.Get("run/agent_version/latest/?from=toto", &v)
+	if err != nil {
+		return nil, err
+	}
+	return v, nil
+}
+
+func (agent *Agent) update() error {
+	v, err := agent.getLatestVersion()
+	if err != nil {
+		return err
+	}
+	if v.Version == version {
+		log.Println("Agent version is up to date.")
+		return nil
+	}
+	response, err := httpClient.Get(v.ArchiveURL)
+	if err != nil {
+		return err
+	}
+	defer response.Body.Close()
+	errUpdate := update.Apply(response.Body, update.Options{
+	// Checksum: []byte(v.ArchiveChecksum),
+	})
+	if errUpdate != nil {
+		return errUpdate
+	}
+	log.Printf("Update done from %s to version %s", version, v.Version)
+	shutdown(249)
+	return nil
 }

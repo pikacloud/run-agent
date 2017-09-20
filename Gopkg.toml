@@ -90,3 +90,7 @@
 [[override]]
   name = "github.com/opencontainers/runtime-spec"
   revision = "1c7c27d043c2a5e513a44084d2b10d77d1402b8c"
+
+[[constraint]]
+  name = "github.com/inconshreveable/go-update"
+	revision = "8152e7eb6ccf8679a64582a66b78519688d156ad"

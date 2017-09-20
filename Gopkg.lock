@@ -88,6 +88,12 @@
 
 [[projects]]
   branch = "master"
+  name = "github.com/inconshreveable/go-update"
+  packages = [".","internal/binarydist","internal/osext"]
+  revision = "8152e7eb6ccf8679a64582a66b78519688d156ad"
+
+[[projects]]
+  branch = "master"
   name = "github.com/jbenet/go-context"
   packages = ["io"]
   revision = "d14ea06fba99483203c19d92cfcd13ebe73135f4"
@@ -208,6 +214,6 @@
 [solve-meta]
   analyzer-name = "dep"
   analyzer-version = 1
-  inputs-digest = "113c0bc2104495500a5eac2fa2e850fee560f20d13b14041dff433a2ff264fb5"
+  inputs-digest = "6cf09ed8e4a3fd0052391253b9fc0a6d1b7f514fea1198fd4f38698b24edd7af"
   solver-name = "gps-cdcl"
   solver-version = 1
