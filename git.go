@@ -35,7 +35,7 @@ func (step *TaskStep) Git() error {
 			URL:   cloneOpts.URL,
 			Depth: 1,
 		}
-		if step.Task.Stream {
+		if step.Task.Stream && step.Task.websocketConn != nil {
 			cloneOptions.Progress = step.Task.LogWriter
 		}
 		repository, errClone := git.PlainClone(cloneOpts.Path, false, cloneOptions)

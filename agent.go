@@ -22,6 +22,8 @@ type CreateAgentOptions struct {
 	Labels    []string `json:"labels,omitempty"`
 	Localtime int      `json:"localtime"`
 	Version   string   `json:"version"`
+	OS        string   `json:"os"`
+	Arch      string   `json:"arch"`
 }
 
 // PingAgentOptions represents the agent Ping() options
@@ -30,6 +32,7 @@ type PingAgentOptions struct {
 	RunningTasks     []string `json:"running_tasks,omitempty"`
 	RunningTerminals []string `json:"running_terminals,omitempty"`
 	Localtime        int      `json:"localtime"`
+	NumGoroutines    int      `json:"num_goroutines"`
 }
 
 // Agent describes the agent
@@ -78,6 +81,8 @@ func (agent *Agent) Register() error {
 		Hostname:  agent.Hostname,
 		Localtime: localtime(),
 		Version:   version,
+		OS:        runtime.GOOS,
+		Arch:      runtime.GOARCH,
 	}
 	if len(agent.Labels) > 0 {
 		opt.Labels = agent.Labels
@@ -121,9 +126,10 @@ func (agent *Agent) Ping() error {
 		flatRunningTasksList = append(flatRunningTasksList, k)
 	}
 	opts := PingAgentOptions{
-		Metrics:      metrics,
-		RunningTasks: flatRunningTasksList,
-		Localtime:    localtime(),
+		Metrics:       metrics,
+		RunningTasks:  flatRunningTasksList,
+		Localtime:     localtime(),
+		NumGoroutines: runtime.NumGoroutine(),
 	}
 	for t := range runningTerminalsList {
 		opts.RunningTerminals = append(opts.RunningTerminals, t.Tid)

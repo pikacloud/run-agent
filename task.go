@@ -81,14 +81,17 @@ func (step *TaskStep) Do() error {
 }
 
 func (step *TaskStep) streamErr(msg string) {
-	if step.Task.Stream {
+	if step.Task.Stream && step.Task.websocketConn != nil {
 		step.Task.LogWriter.Write([]byte(fmt.Sprintf("\033[0;31m%s\033[0m", msg)))
 	}
 }
 
 func (step *TaskStep) stream(msg string) {
-	if step.Task.Stream {
-		step.Task.LogWriter.Write([]byte(msg))
+	if step.Task.Stream && step.Task.websocketConn != nil {
+		_, err := step.Task.LogWriter.Write([]byte(msg))
+		if err != nil {
+			log.Printf("Unable to write to task LogWriter: %s", err)
+		}
 	}
 }
 
@@ -107,6 +110,8 @@ func (task *Task) streaming() error {
 	c, _, err := dialer.Dial(u.String(), nil)
 	task.websocketConn = c
 	if err != nil {
+		r.Close()
+		w.Close()
 		return fmt.Errorf("Error dialing %s: %s%s", wsURL, path, err)
 	}
 	log.Printf("Task %s connected to %s", task.ID, u.String())
@@ -120,6 +125,7 @@ func (task *Task) streaming() error {
 		for {
 			_, _, err := c.NextReader()
 			if err != nil {
+				log.Println(err)
 				return
 			}
 		}
@@ -153,7 +159,7 @@ func (task *Task) Do() error {
 		}
 	}
 	defer func() {
-		if task.Stream {
+		if task.Stream && task.websocketConn != nil {
 			task.websocketConn.Close()
 		}
 	}()
