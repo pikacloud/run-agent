@@ -1,8 +1,12 @@
 package main
 
 import (
+	"archive/tar"
+	"compress/gzip"
 	"context"
+	"encoding/hex"
 	"fmt"
+	"io"
 	"log"
 	"runtime"
 	"strings"
@@ -196,12 +200,14 @@ type versionUpdate struct {
 	Arch            string `json:"arch"`
 	ArchiveURL      string `json:"archive_url"`
 	ArchiveChecksum string `json:"archive_checksum"`
+	BinaryChecksum  string `json:"binary_checksum"`
+	BinarySignature string `json:"binary_signature"`
 }
 
 func (agent *Agent) getLatestVersion() (*versionUpdate, error) {
-	// versionURI := fmt.Sprintf("run/agent_version/latest", version, runtime.GOOS, runtime.GOARCH)
+	versionURI := fmt.Sprintf("run/agent-version/latest/?os=%s&arch=%s", runtime.GOOS, runtime.GOARCH)
 	v := &versionUpdate{}
-	err := agent.Client.Get("run/agent_version/latest/?from=toto", &v)
+	err := agent.Client.Get(versionURI, &v)
 	if err != nil {
 		return nil, err
 	}
@@ -214,17 +220,66 @@ func (agent *Agent) update() error {
 		return err
 	}
 	if v.Version == version {
-		log.Println("Agent version is up to date.")
+		log.Printf("Agent version %s is up to date.", version)
 		return nil
 	}
+	log.Printf("Preparing update from %s to %s", version, v.Version)
+	checksum, err := hex.DecodeString(v.BinaryChecksum)
+	if err != nil {
+		return err
+	}
+	signature, err := hex.DecodeString(v.BinarySignature)
+	if err != nil {
+		return err
+	}
+	log.Printf("Downloading %s", v.ArchiveURL)
 	response, err := httpClient.Get(v.ArchiveURL)
 	if err != nil {
 		return err
 	}
 	defer response.Body.Close()
-	errUpdate := update.Apply(response.Body, update.Options{
-	// Checksum: []byte(v.ArchiveChecksum),
-	})
+	log.Printf("Uncompressing run-agent %v update", v.Version)
+	gzReader, err := gzip.NewReader(response.Body)
+	if err != nil {
+		return err
+	}
+	binaryReader, binaryWriter := io.Pipe()
+	defer binaryReader.Close()
+	defer binaryWriter.Close()
+	tarReader := tar.NewReader(gzReader)
+	for {
+		header, err := tarReader.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return err
+		}
+		if header.Name == "run-agent" {
+			go func() {
+				if _, err := io.Copy(binaryWriter, tarReader); err != nil {
+					log.Fatalf("ExtractTarGz: Copy() failed: %s", err.Error())
+				}
+				defer binaryWriter.Close()
+			}()
+			break
+		}
+	}
+	log.Println("Applying update")
+	opts := update.Options{
+		Checksum:  checksum,
+		Signature: signature,
+	}
+	publicKey := `
+-----BEGIN PUBLIC KEY-----
+MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEA+UzJD+more/0adp0/IKYGl9OgO1
+A5t0SQ22qx1j3A6ozKZpNGTQ8JZCudWza3vuZ9RcjsBfbBZVmWZwqDMYbQ==
+-----END PUBLIC KEY-----`
+	err = opts.SetPublicKeyPEM([]byte(publicKey))
+	if err != nil {
+		return fmt.Errorf("Could not parse public key: %v", err)
+	}
+	errUpdate := update.Apply(binaryReader, opts)
 	if errUpdate != nil {
 		return errUpdate
 	}

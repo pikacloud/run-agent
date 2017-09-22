@@ -87,9 +87,9 @@ func TestAgentLatestVersion(t *testing.T) {
 	setup()
 	defer teardown()
 	// testURI := fmt.Sprintf("/v1/run/agent_version/latest/?from=%s&os=%s&arch=%s", version, runtime.GOOS, runtime.GOARCH)
-	mux.HandleFunc("/v1/run/agent_version/latest/", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/v1/run/agent-version/latest/", func(w http.ResponseWriter, r *http.Request) {
 		testMethod(t, r, "GET")
-		fmt.Fprint(w, `{"version": "1.0.1", "archive_url":"http://foo.bar/agent.zip"}`)
+		fmt.Fprint(w, `{"version": "1.0.1", "archive_url":"http://foo.bar/agent.tar.gz"}`)
 	})
 	err := createTestAgent()
 	if err != nil {

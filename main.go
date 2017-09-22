@@ -80,11 +80,13 @@ func main() {
 	flag.Parse()
 	if *autoMode {
 		for {
+			log.Println("Executing run-agent")
 			cmd, err := execAgent()
 			if err != nil {
 				log.Printf("Cannot execute agent: %s", err)
 				time.Sleep(3 * time.Second)
 			}
+			log.Println("Run-agent is running")
 			errWait := cmd.Wait()
 			if errWait != nil {
 				log.Printf("Agent exited: %s", errWait)
@@ -173,6 +175,7 @@ func main() {
 		agent.Client.BaseURL = baseURL
 	}
 	if *updaterMode {
+		log.Println("Checking for run-agent updates")
 		errUpdate := agent.update()
 		if errUpdate != nil {
 			log.Fatalf("Unable to auto-update agent: %s", errUpdate)
