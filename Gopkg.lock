@@ -142,8 +142,8 @@
 [[projects]]
   name = "github.com/shirou/gopsutil"
   packages = ["cpu","disk","internal/common","load","mem","net"]
-  revision = "aa0a3bce9d1f4efc710ed812f19f77851da2eedd"
-  version = "v2.17.06"
+  revision = "a452de7c734a0fa0f16d2e5725b0fa5934d9fbec"
+  version = "v2.17.08"
 
 [[projects]]
   name = "github.com/src-d/gcfg"
