@@ -68,7 +68,7 @@ func getDiskInfo() (map[string]disk.IOCountersStat, []disk.PartitionStat, []*dis
 	}
 	var usstats []*disk.UsageStat
 	for _, partition := range pstats {
-		usstat, err := disk.Usage(partition.Device)
+		usstat, err := disk.Usage(partition.Mountpoint)
 		if err != nil {
 			return nil, nil, nil, fmt.Errorf("Error getting usage stats for %s: %v", partition.Device, err)
 		}
