@@ -104,27 +104,27 @@ func (agent *Agent) basicMetrics() {
 	for {
 		c, err := getCPUInfo()
 		if err != nil {
-			//log.Println(err)
+			logger.Error(err)
 		}
 		m, err := getRAMInfo()
 		if err != nil {
-			// log.Println(err)
+			logger.Error(err)
 		}
 		s, err := getSWAPInfo()
 		if err != nil {
-			// log.Println(err)
+			logger.Error(err)
 		}
 		io, ps, us, err := getDiskInfo()
 		if err != nil {
-			// log.Println(err)
+			logger.Error(err)
 		}
 		la, ms, err := getLoadAverage()
 		if err != nil {
-			// log.Println(err)
+			logger.Error(err)
 		}
 		ni, ionet, err := getNetInfo()
 		if err != nil {
-			// log.Println(err)
+			logger.Error(err)
 		}
 		metrics.CPUStats = c
 		metrics.MemStats = m

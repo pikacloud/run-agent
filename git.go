@@ -42,7 +42,7 @@ func (step *TaskStep) Git() error {
 			os.RemoveAll(cloneOpts.Path)
 			return errClone
 		}
-		//log.Printf("%s cloned in %s", cloneOpts.URL, cloneOpts.Path)
+		logger.Debugf("%s cloned in %s", cloneOpts.URL, cloneOpts.Path)
 		head, _ := repository.Head()
 		commit, _ := repository.CommitObject(head.Hash())
 		msg := fmt.Sprintf("\n\n%s\n\n", strings.Replace(commit.String(), "\n", "\n\r", -1))

@@ -4,7 +4,6 @@ import (
 	"context"
 	"io"
 
-	"github.com/apex/log"
 	docker_types "github.com/docker/docker/api/types"
 	"github.com/gorilla/websocket"
 	"github.com/moby/moby/pkg/stdcopy"
@@ -20,14 +19,14 @@ func (c WSReaderWriter) Write(p []byte) (n int, err error) {
 	// output, err := iconv.ConvertString(string(p), "ISO-8859-1", "utf-8")
 
 	if err != nil {
-		log.Errorf("WSReaderWriter: %+v", err)
+		logger.Errorf("WSReaderWriter: %+v", err)
 		return 0, err
 	}
 
 	err = c.WriteMessage(websocket.TextMessage, []byte(p))
 
 	if err != nil {
-		log.Errorf("WSReaderWriter: %+v", err)
+		logger.Errorf("WSReaderWriter: %+v", err)
 	}
 
 	return len(p), err
@@ -49,7 +48,7 @@ func execPipe(resp docker_types.HijackedResponse, inStream io.Reader, outStream,
 		go func() {
 			// always do this because we are never tty
 			_, err = stdcopy.StdCopy(outStream, errorStream, resp.Reader)
-			log.Debug("[hijack] End of stdout")
+			logger.Debug("[hijack] End of stdout")
 			receiveStdout <- err
 		}()
 	}
@@ -58,11 +57,11 @@ func execPipe(resp docker_types.HijackedResponse, inStream io.Reader, outStream,
 	go func() {
 		if inStream != nil {
 			io.Copy(resp.Conn, inStream)
-			log.Debug("[hijack] End of stdin")
+			logger.Debug("[hijack] End of stdin")
 		}
 
 		if err := resp.CloseWrite(); err != nil {
-			log.Errorf("Could not send EOF: %s", err.Error())
+			logger.Errorf("Could not send EOF: %s", err.Error())
 		}
 		close(stdinDone)
 	}()
@@ -70,13 +69,13 @@ func execPipe(resp docker_types.HijackedResponse, inStream io.Reader, outStream,
 	select {
 	case err := <-receiveStdout:
 		if err != nil {
-			log.Errorf("Error receiveStdout: %s", err)
+			logger.Errorf("Error receiveStdout: %s", err)
 			return err
 		}
 	case <-stdinDone:
 		if outStream != nil || errorStream != nil {
 			if err := <-receiveStdout; err != nil {
-				log.Errorf("Error receiveStdout: %s", err)
+				logger.Errorf("Error receiveStdout: %s", err)
 				return err
 			}
 		}
