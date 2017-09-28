@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
-	"log"
 	"net/url"
 	"os"
 	"os/exec"
@@ -189,7 +188,7 @@ func (agent *Agent) dockerPull(opts *DockerPullOpts) error {
 	if _, err = io.Copy(ioutil.Discard, out); err != nil {
 		return err
 	}
-	log.Printf("New image pulled %s", opts.Image)
+	logger.Infof("New image pulled %s", opts.Image)
 	return nil
 }
 
@@ -235,7 +234,7 @@ func (agent *Agent) dockerCreate(opts *DockerCreateOpts) (*docker_types_containe
 	if err != nil {
 		return nil, err
 	}
-	log.Printf("New container created %s", container.ID)
+	logger.Infof("New container created %s", container.ID)
 	return &container, nil
 }
 
@@ -245,7 +244,7 @@ func (agent *Agent) dockerStart(containerID string) error {
 	if err := agent.DockerClient.ContainerStart(ctx, containerID, startOpts); err != nil {
 		return err
 	}
-	log.Printf("New container started %s", containerID)
+	logger.Infof("New container started %s", containerID)
 	return nil
 }
 
@@ -254,7 +253,7 @@ func (agent *Agent) dockerUnpause(containerID string) error {
 	if err := agent.DockerClient.ContainerUnpause(ctx, containerID); err != nil {
 		return err
 	}
-	log.Printf("Container %s unpaused", containerID)
+	logger.Infof("Container %s unpaused", containerID)
 	return nil
 }
 
@@ -263,7 +262,7 @@ func (agent *Agent) dockerPause(containerID string) error {
 	if err := agent.DockerClient.ContainerPause(ctx, containerID); err != nil {
 		return err
 	}
-	log.Printf("Container %s paused", containerID)
+	logger.Infof("Container %s paused", containerID)
 	return nil
 }
 
@@ -272,7 +271,7 @@ func (agent *Agent) dockerStop(containerID string, timeout time.Duration) error 
 	if err := agent.DockerClient.ContainerStop(ctx, containerID, &timeout); err != nil {
 		return err
 	}
-	log.Printf("Container %s stopped", containerID)
+	logger.Infof("Container %s stopped", containerID)
 	return nil
 }
 
@@ -281,7 +280,7 @@ func (agent *Agent) dockerRestart(containerID string, timeout time.Duration) err
 	if err := agent.DockerClient.ContainerRestart(ctx, containerID, &timeout); err != nil {
 		return err
 	}
-	log.Printf("Container %s restarted", containerID)
+	logger.Infof("Container %s restarted", containerID)
 	return nil
 }
 
@@ -295,16 +294,8 @@ func (agent *Agent) dockerRemove(containerID string, opts *DockerRemoveOpts) err
 	if err := agent.DockerClient.ContainerRemove(ctx, containerID, removeOpts); err != nil {
 		return err
 	}
-	log.Printf("Container %s remove", containerID)
+	logger.Infof("Container %s remove", containerID)
 	return nil
-}
-
-// LogWriter is a type
-type LogWriter log.Logger
-
-func (w *LogWriter) Write(b []byte) (int, error) {
-	(*log.Logger)(w).Print(string(b))
-	return len(b), nil
 }
 
 // ReadDockerignore reads the .dockerignore file in the context directory and
@@ -345,7 +336,7 @@ type IDPair struct {
 
 func (step *TaskStep) dockerBuild(opts *DockerBuildOpts) error {
 	defer os.RemoveAll(opts.Path)
-	log.Printf("Building image %s", opts.Tag)
+	logger.Infof("Building image %s", opts.Tag)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	contextDir, relDockerfile, err := builder.GetContextFromLocalDir(opts.Path, fmt.Sprintf("%s/%s", opts.Path, "Dockerfile"))
@@ -368,7 +359,7 @@ func (step *TaskStep) dockerBuild(opts *DockerBuildOpts) error {
 	}
 	defer buildCtx.Close()
 	var body io.Reader
-	progressOutput := streamformatter.NewStreamFormatter().NewProgressOutput(step.Task.LogWriter, true)
+	progressOutput := streamformatter.NewStreamFormatter().NewProgressOutput(step.Task.streamer.ioWriter, true)
 	body = progress.NewProgressReader(buildCtx, progressOutput, 0, "", "Sending build context to Docker daemon")
 	buildOpts := docker_types.ImageBuildOptions{
 		NoCache:    true,
@@ -402,10 +393,10 @@ func (step *TaskStep) dockerBuild(opts *DockerBuildOpts) error {
 			if err != nil {
 				continue
 			}
-			step.stream(j.Stream)
+			step.stream([]byte(j.Stream))
 		}
 	}
-	log.Printf("Image %s built", opts.Tag)
+	logger.Infof("Image %s built", opts.Tag)
 	return nil
 }
 
@@ -423,7 +414,7 @@ func (agent *Agent) dockerTerminal(opts *DockerTerminalOpts) error {
 	addr := wsURLParams[1]
 	path := fmt.Sprintf("/_ws/hub/agent/%s:%s:%s/", agent.ID, opts.Tid, terminal.Token)
 	u := url.URL{Scheme: scheme, Host: addr, Path: path}
-	log.Printf("connecting to %s", u.String())
+	logger.Infof("connecting to %s", u.String())
 
 	dialer := websocket.DefaultDialer
 	dialer.HandshakeTimeout = 3 * time.Second
@@ -518,7 +509,7 @@ func (agent *Agent) dockerTerminal(opts *DockerTerminalOpts) error {
 	// // }
 	runningTerminalsList[opts] = true
 	defer func() {
-		log.Println("Defer fx terminal")
+		logger.Info("Defer fx terminal")
 		data, errInspect := agent.DockerClient.ContainerExecInspect(ctx, execCreateResponse.ID)
 		if errInspect == nil {
 			if data.Running {
@@ -533,24 +524,24 @@ func (agent *Agent) dockerTerminal(opts *DockerTerminalOpts) error {
 				if strings.HasSuffix(runtime.GOOS, "darwin") || isXhyve {
 					// https://www.reddit.com/r/docker/comments/6d8yt3/killing_a_process_from_docker_exec_on_os_x/
 					// https://gist.github.com/bschwind/7ef38e2918c43bd7ee23d86dad86db7d
-					log.Println("Killing leaked process (darwin)")
+					logger.Info("Killing leaked process (darwin)")
 					command := fmt.Sprintf("echo kill -9 %d > %s", data.Pid, xhyveTTY)
 					cmd := exec.Command("/bin/sh", "-c", command)
 					errCommand := cmd.Run()
 					if errCommand != nil {
-						log.Printf("Failed to kill PID %d in the xhyve VM: %v", data.Pid, errCommand)
+						logger.Infof("Failed to kill PID %d in the xhyve VM: %v", data.Pid, errCommand)
 					} else {
-						log.Printf("Killed leaked PID %d in the xhyve VM", data.Pid)
+						logger.Infof("Killed leaked PID %d in the xhyve VM", data.Pid)
 					}
 				} else {
-					log.Println("Killing leaked process (unix)")
+					logger.Info("Killing leaked process (unix)")
 					command := fmt.Sprintf("kill -9 %d", data.Pid)
 					cmd := exec.Command("/bin/sh", "-c", command)
 					errCommand := cmd.Run()
 					if errCommand != nil {
-						log.Printf("Failed to kill PID %d locally: %v", data.Pid, errCommand)
+						logger.Infof("Failed to kill PID %d locally: %v", data.Pid, errCommand)
 					} else {
-						log.Printf("Leaked PID %d killed locally", data.Pid)
+						logger.Infof("Leaked PID %d killed locally", data.Pid)
 					}
 					// configKillExec.Cmd = []string{"kill", "-9", fmt.Sprintf("%d", data.Pid)}
 					// killCreateResponse, errKillCreate := agent.DockerClient.ContainerExecCreate(ctx, opts.ID, configKillExec)
@@ -560,12 +551,12 @@ func (agent *Agent) dockerTerminal(opts *DockerTerminalOpts) error {
 					// 	if errKillStart == nil {
 					// 		dataKill, errKillInspect := agent.DockerClient.ContainerExecInspect(ctx, execCreateResponse.ID)
 					// 		if errKillInspect != nil {
-					// 			log.Printf("Cannot kill leaked process %d", data.Pid)
+					// 			logger.Infof("Cannot kill leaked process %d", data.Pid)
 					// 		} else {
 					// 			if dataKill.ExitCode == 0 {
-					// 				log.Printf("Successfully killed leaked process %d", data.Pid)
+					// 				logger.Infof("Successfully killed leaked process %d", data.Pid)
 					// 			} else {
-					// 				log.Printf("Cannot kill leaked process: 'kill -9 %d' exit code is %d'", data.Pid, dataKill.ExitCode)
+					// 				logger.Infof("Cannot kill leaked process: 'kill -9 %d' exit code is %d'", data.Pid, dataKill.ExitCode)
 					// 			}
 					// 		}
 					// 	}
@@ -574,17 +565,22 @@ func (agent *Agent) dockerTerminal(opts *DockerTerminalOpts) error {
 			}
 		}
 
-		// log.Printf("Garbage collecting Terminal %s", opts.Task.ID)
+		// logger.Infof("Garbage collecting Terminal %s", opts.Task.ID)
 		// cmd.Process.Kill()
 		// cmd.Process.Wait()
-		// log.Printf("Terminal command killed %s", opts.Task.ID)
+		// logger.Infof("Terminal command killed %s", opts.Task.ID)
 		// tty.Close()
-		// log.Printf("TTY closed %s", opts.Task.ID)
+		// logger.Infof("TTY closed %s", opts.Task.ID)
 		execAttachResponse.Close()
-		log.Printf("Exec session %s closed", execCreateResponse.ID)
+		logger.Infof("Exec session %s closed", execCreateResponse.ID)
 		c.Close()
-		log.Printf("Websocket connection closed %s", opts.Tid)
+		logger.Infof("Websocket connection closed %s", opts.Tid)
 		delete(runningTerminalsList, opts)
+		err := terminal.Delete(pikacloudClient)
+		if err != nil {
+			logger.Info("Cannot delete terminal in API: %+v", err)
+		}
+
 		return
 
 	}()
@@ -600,12 +596,12 @@ func (agent *Agent) dockerTerminal(opts *DockerTerminalOpts) error {
 			}
 			messageType, reader, errReader := c.NextReader()
 			if errReader != nil {
-				log.Println("Unable to grab next reader")
+				logger.Info("Unable to grab next reader")
 				quit = true
 				return
 			}
 			if messageType == websocket.TextMessage {
-				log.Println("Unexpected text message")
+				logger.Info("Unexpected text message")
 				c.WriteMessage(websocket.TextMessage, []byte("Unexpected text message"))
 				quit = true
 				continue
@@ -613,14 +609,14 @@ func (agent *Agent) dockerTerminal(opts *DockerTerminalOpts) error {
 			dataTypeBuf := make([]byte, 1)
 			read, errR := reader.Read(dataTypeBuf)
 			if errR != nil {
-				log.Printf("Unable to read message type from reader %+v", errR)
+				logger.Infof("Unable to read message type from reader %+v", errR)
 				c.WriteMessage(websocket.TextMessage, []byte("Unable to read message type from reader"))
 				quit = true
 				return
 			}
 
 			if read != 1 {
-				log.Printf("Unexpected number of bytes read %+v", read)
+				logger.Infof("Unexpected number of bytes read %+v", read)
 				quit = true
 				return
 			}
@@ -629,7 +625,7 @@ func (agent *Agent) dockerTerminal(opts *DockerTerminalOpts) error {
 			case 0:
 				copied, errCopy := io.Copy(execAttachResponse.Conn, reader)
 				if errCopy != nil {
-					log.Printf("Error after copying %d bytes %+v", copied, errCopy)
+					logger.Infof("Error after copying %d bytes %+v", copied, errCopy)
 				}
 			case 1:
 				decoder := json.NewDecoder(reader)
@@ -639,10 +635,10 @@ func (agent *Agent) dockerTerminal(opts *DockerTerminalOpts) error {
 					c.WriteMessage(websocket.TextMessage, []byte("Error decoding resize message: "+errResizeMessage.Error()))
 					continue
 				}
-				log.Printf("Resizing terminal %+v", resizeMessage)
+				logger.Infof("Resizing terminal %+v", resizeMessage)
 				errResize := agent.ContainerExecResize(execCreateResponse.ID, resizeMessage.Rows, resizeMessage.Cols)
 				if err != nil {
-					log.Printf("Unable to resize terminal %+v", errResize)
+					logger.Infof("Unable to resize terminal %+v", errResize)
 				}
 				// _, _, errno := syscall.Syscall(
 				// 	syscall.SYS_IOCTL,
@@ -651,19 +647,19 @@ func (agent *Agent) dockerTerminal(opts *DockerTerminalOpts) error {
 				// 	uintptr(unsafe.Pointer(&resizeMessage)),
 				// )
 				// if errno != 0 {
-				// 	log.Printf("Unable to resize terminal %+v", errno)
+				// 	logger.Infof("Unable to resize terminal %+v", errno)
 				// }
 			default:
-				log.Printf("Unknown data type %+v", dataTypeBuf)
+				logger.Infof("Unknown data type %+v", dataTypeBuf)
 			}
 			// if err != nil {
-			// 	log.Println("Error reading message from WS", err)
+			// 	logger.Info("Error reading message from WS", err)
 			// 	return
 			// }
 			//
 			// _, err = execAttachResponse.Conn.Write(message)
 			// if err != nil {
-			// 	log.Println("Error writing message to container", err)
+			// 	logger.Info("Error writing message to container", err)
 			// 	return
 			// }
 
@@ -743,14 +739,14 @@ func (agent *Agent) dockerTerminal(opts *DockerTerminalOpts) error {
 	// 	// }
 	// 	messageType, reader, err := c.NextReader()
 	// 	if err != nil {
-	// 		log.Println("Unable to grab next reader")
+	// 		logger.Info("Unable to grab next reader")
 	// 		quit = true
-	// 		log.Println("Sending true in quit")
+	// 		logger.Info("Sending true in quit")
 	// 		return nil
 	// 	}
 	//
 	// 	if messageType == websocket.TextMessage {
-	// 		log.Println("Unexpected text message")
+	// 		logger.Info("Unexpected text message")
 	// 		c.WriteMessage(websocket.TextMessage, []byte("Unexpected text message"))
 	// 		quit = true
 	// 		continue
@@ -758,14 +754,14 @@ func (agent *Agent) dockerTerminal(opts *DockerTerminalOpts) error {
 	// 	dataTypeBuf := make([]byte, 1)
 	// 	read, err := reader.Read(dataTypeBuf)
 	// 	if err != nil {
-	// 		log.Printf("Unable to read message type from reader %+v", err)
+	// 		logger.Infof("Unable to read message type from reader %+v", err)
 	// 		c.WriteMessage(websocket.TextMessage, []byte("Unable to read message type from reader"))
 	// 		quit = true
 	// 		return nil
 	// 	}
 	//
 	// 	if read != 1 {
-	// 		log.Printf("Unexpected number of bytes read %+v", read)
+	// 		logger.Infof("Unexpected number of bytes read %+v", read)
 	// 		quit = true
 	// 		return nil
 	// 	}
@@ -774,7 +770,7 @@ func (agent *Agent) dockerTerminal(opts *DockerTerminalOpts) error {
 	// 	case 0:
 	// 		copied, err := io.Copy(tty, reader)
 	// 		if err != nil {
-	// 			log.Printf("Error after copying %d bytes %+v", copied, err)
+	// 			logger.Infof("Error after copying %d bytes %+v", copied, err)
 	// 		}
 	// 	case 1:
 	// 		decoder := json.NewDecoder(reader)
@@ -784,7 +780,7 @@ func (agent *Agent) dockerTerminal(opts *DockerTerminalOpts) error {
 	// 			c.WriteMessage(websocket.TextMessage, []byte("Error decoding resize message: "+err.Error()))
 	// 			continue
 	// 		}
-	// 		log.Printf("Resizing terminal %+v", resizeMessage)
+	// 		logger.Infof("Resizing terminal %+v", resizeMessage)
 	// 		_, _, errno := syscall.Syscall(
 	// 			syscall.SYS_IOCTL,
 	// 			tty.Fd(),
@@ -792,10 +788,10 @@ func (agent *Agent) dockerTerminal(opts *DockerTerminalOpts) error {
 	// 			uintptr(unsafe.Pointer(&resizeMessage)),
 	// 		)
 	// 		if errno != 0 {
-	// 			log.Printf("Unable to resize terminal %+v", errno)
+	// 			logger.Infof("Unable to resize terminal %+v", errno)
 	// 		}
 	// 	default:
-	// 		log.Printf("Unknown data type %+v", dataTypeBuf)
+	// 		logger.Infof("Unknown data type %+v", dataTypeBuf)
 	// 	}
 	// }
 	// // for {
@@ -820,7 +816,7 @@ func (agent *Agent) dockerTerminal(opts *DockerTerminalOpts) error {
 	// if err := agent.DockerClient.ContainerRestart(ctx, containerID, &timeout); err != nil {
 	// 	return err
 	// }
-	// log.Printf("Container %s restarted", containerID)
+	// logger.Infof("Container %s restarted", containerID)
 	// return nil
 	// return nil
 }
@@ -839,10 +835,10 @@ func (agent *Agent) infiniteSyncDockerInfo() {
 		if !reflect.DeepEqual(dockerInfoState, info) {
 			err := agent.syncDockerInfo(info)
 			if err != nil {
-				log.Printf("Cannot sync docker info: %+v", err)
+				logger.Infof("Cannot sync docker info: %+v", err)
 			} else {
 				dockerInfoState = info
-				log.Println("Sync docker info OK")
+				logger.Debug("Sync docker info OK")
 			}
 		}
 		time.Sleep(3 * time.Second)
@@ -877,7 +873,7 @@ func (agent *Agent) syncDockerContainers(opts syncDockerContainersOptions) error
 	for _, container := range containers {
 		data, err := json.Marshal(container)
 		if err != nil {
-			log.Printf("Cannot decode %v", container)
+			logger.Infof("Cannot decode %v", container)
 			continue
 		}
 		if len(opts.ContainersID) > 0 {
@@ -894,12 +890,12 @@ func (agent *Agent) syncDockerContainers(opts syncDockerContainersOptions) error
 		}
 		inspect, err := agent.DockerClient.ContainerInspect(context.Background(), container.ID)
 		if err != nil {
-			log.Printf("Cannot inspect container %v", err)
+			logger.Infof("Cannot inspect container %v", err)
 			continue
 		}
 		inspectConfig, err := json.Marshal(inspect)
 		if err != nil {
-			log.Printf("Cannot decode %v", inspect)
+			logger.Infof("Cannot decode %v", inspect)
 			continue
 		}
 		containersCreateList = append(containersCreateList,
@@ -917,7 +913,7 @@ func (agent *Agent) syncDockerContainers(opts syncDockerContainersOptions) error
 		if status != 200 {
 			return fmt.Errorf("Failed to push docker containers: %d", status)
 		}
-		log.Printf("Sync docker %d containers of %d OK", len(containersCreateList), len(containers))
+		logger.Infof("Sync docker %d containers of %d OK", len(containersCreateList), len(containers))
 	}
 
 	return nil
@@ -930,7 +926,7 @@ func (agent *Agent) unsyncDockerContainer(containerID string) error {
 	if err != nil {
 		return err
 	}
-	log.Printf("Container %s garbage collected", containerID)
+	logger.Infof("Container %s garbage collected", containerID)
 	return nil
 }
 
@@ -991,7 +987,7 @@ func (agent *Agent) listenDockerEvents() error {
 		events, errs := agent.DockerClient.Events(ctx, docker_types.EventsOptions{})
 		err := waitDockerEvents(events, errs)
 		if err != nil {
-			log.Printf("Error reading docker events: %s", err)
+			logger.Infof("Error reading docker events: %s", err)
 			time.Sleep(3 * time.Second)
 		}
 	}

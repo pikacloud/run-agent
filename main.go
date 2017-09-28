@@ -4,15 +4,16 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"log"
 	"os"
 	"os/exec"
 	"os/signal"
 	"runtime/pprof"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
 
+	"github.com/Sirupsen/logrus"
 	"github.com/pikacloud/gopikacloud"
 )
 
@@ -38,6 +39,7 @@ var (
 	gitRef            string
 	lock              = sync.RWMutex{}
 	pikacloudClient   *gopikacloud.Client
+	logger            = logrus.New()
 )
 
 // PluginConfig describes a plugin option
@@ -52,7 +54,7 @@ func pluralize(n int) string {
 }
 
 func shutdown(exitCode int) {
-	log.Println("Shutting down run-agent...")
+	logger.Println("Shutting down run-agent...")
 	os.Exit(exitCode)
 }
 
@@ -61,15 +63,15 @@ func execAgent() (*exec.Cmd, error) {
 	cmd.Env = os.Environ()
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
-		log.Fatalln(err)
+		logger.Fatalln(err)
 	}
 	stderr, err := cmd.StderrPipe()
 	if err != nil {
-		log.Fatalln(err)
+		logger.Fatalln(err)
 	}
 	errStart := cmd.Start()
 	if errStart != nil {
-		log.Fatalln(errStart)
+		logger.Fatalln(errStart)
 	}
 	go io.Copy(os.Stdout, stdout)
 	go io.Copy(os.Stderr, stderr)
@@ -78,38 +80,28 @@ func execAgent() (*exec.Cmd, error) {
 
 func main() {
 	flag.Parse()
+	loglevel := os.Getenv("LOG_LEVEL")
+	switch strings.ToUpper(loglevel) {
+	case "DEBUG":
+		logger.SetLevel(logrus.DebugLevel)
+	default:
+		logger.SetLevel(logrus.InfoLevel)
+	}
 	if *autoMode {
 		for {
-			log.Println("Executing run-agent")
+			logger.Info("Executing run-agent")
 			cmd, err := execAgent()
 			if err != nil {
-				log.Printf("Cannot execute agent: %s", err)
+				logger.Errorf("Cannot execute agent: %s", err)
 				time.Sleep(3 * time.Second)
 			}
-			log.Println("Run-agent is running")
+			logger.Info("Run-agent is running")
 			errWait := cmd.Wait()
 			if errWait != nil {
-				log.Printf("Agent exited: %s", errWait)
+				logger.Errorf("Agent exited: %s", errWait)
 			}
 			time.Sleep(3 * time.Second)
 		}
-
-		// for {
-		// 	buf := make([]byte, 1024)
-		// 	read, err := stdout.Read(buf)
-		// 	if err != nil {
-		// 		log.Printf("Error reading from stdout: %s", err)
-		// 	}
-		// 	fmt.Println(buf[:read])
-		// 	bufErr := make([]byte, 1024)
-		// 	readErr, errRead := stderr.Read(buf)
-		// 	if errRead != nil {
-		// 		log.Printf("Error reading from stderr: %s", err)
-		// 		break
-		// 	}
-		// 	fmt.Println(bufErr[:readErr])
-		// }
-
 	}
 	runningTasksList = make(map[string]*Task)
 	metrics = &Metrics{}
@@ -126,14 +118,14 @@ func main() {
 	if *cpuprofile != "" {
 		f, err := os.Create(*cpuprofile)
 		if err != nil {
-			log.Fatal(err)
+			logger.Fatal(err)
 		}
 		if err := pprof.StartCPUProfile(f); err != nil {
-			log.Fatal("could not start CPU profile: ", err)
+			logger.Fatalf("could not start CPU profile: %+v", err)
 		}
-		log.Println("Starting CPU profiler")
+		logger.Info("Starting CPU profiler")
 		defer func() {
-			log.Println("Stopping CPU profiler")
+			logger.Info("Stopping CPU profiler")
 			pprof.StopCPUProfile()
 		}()
 	}
@@ -157,7 +149,7 @@ func main() {
 	}
 
 	if apiToken == "" {
-		log.Fatalln("PIKACLOUD_API_TOKEN is empty")
+		logger.Fatal("PIKACLOUD_API_TOKEN is empty")
 	}
 	pikacloudClient = gopikacloud.NewClient(apiToken)
 	if baseURL != "" {
@@ -166,7 +158,7 @@ func main() {
 	if hostname == "" {
 		h, err := os.Hostname()
 		if err != nil {
-			log.Fatalf("Unable to retrieve agent hostname: %v", err)
+			logger.Fatalf("Unable to retrieve agent hostname: %v", err)
 		}
 		hostname = h
 	}
@@ -175,16 +167,16 @@ func main() {
 		agent.Client.BaseURL = baseURL
 	}
 	if *updaterMode {
-		log.Println("Checking for run-agent updates")
+		logger.Info("Checking for run-agent updates")
 		errUpdate := agent.update()
 		if errUpdate != nil {
-			log.Fatalf("Unable to auto-update agent: %s", errUpdate)
+			logger.Fatalf("Unable to auto-update agent: %s", errUpdate)
 		}
 	}
 
 	err := agent.Register()
 	if err != nil {
-		log.Fatalf("Unable to register agent: %s", err.Error())
+		logger.Fatalf("Unable to register agent: %s", err.Error())
 	}
 	agent.syncDockerContainers(syncDockerContainersOptions{})
 	wg := sync.WaitGroup{}
@@ -203,7 +195,7 @@ func main() {
 	wg.Add(1)
 	go agent.basicMetrics()
 	catchedSignal := <-killchan
-	log.Printf("Signal %d catched", catchedSignal)
+	logger.Debugf("Signal %d catched", catchedSignal)
 	pprof.StopCPUProfile()
 	shutdown(0)
 }

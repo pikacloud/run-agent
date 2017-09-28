@@ -7,7 +7,6 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
-	"log"
 	"runtime"
 	"strings"
 	"time"
@@ -94,7 +93,7 @@ func (agent *Agent) Register() error {
 	if status != 200 {
 		return fmt.Errorf("Failed to create agent http code: %d", status)
 	}
-	log.Printf("Agent %s registered with hostname %s (agent version %s)\n", agent.ID, agent.Hostname, version)
+	logger.Printf("Agent %s registered with hostname %s (agent version %s)\n", agent.ID, agent.Hostname, version)
 	return nil
 }
 
@@ -102,13 +101,13 @@ func (agent *Agent) infinitePing() {
 	for {
 		err := agent.Ping()
 		if err != nil {
-			log.Printf("Cannot ping %+v", err)
-			log.Println("Trying to register lost agent")
+			logger.Errorf("Cannot ping %+v", err)
+			logger.Info("Trying to register lost agent")
 			agent.Register()
 			agent.syncDockerContainers(syncDockerContainersOptions{})
 			info, err := agent.DockerClient.Info(context.Background())
 			if err != nil {
-				log.Printf("Cannot fetch docker info %+v", err)
+				logger.Errorf("Cannot fetch docker info %+v", err)
 			} else {
 				agent.syncDockerInfo(info)
 			}
@@ -142,7 +141,7 @@ func (agent *Agent) Ping() error {
 		return fmt.Errorf("ping to %s returns %d codes", pingURI, status)
 	}
 	nbGoroutines := runtime.NumGoroutine()
-	log.Printf("Ping OK (%d running task%s, %d running terminal%s, %d goroutine%s)", len(opts.RunningTasks), pluralize(len(opts.RunningTasks)), len(opts.RunningTerminals), pluralize(len(opts.RunningTerminals)), nbGoroutines, pluralize(nbGoroutines))
+	logger.Debugf("Ping OK (%d running task%s, %d running terminal%s, %d goroutine%s)", len(opts.RunningTasks), pluralize(len(opts.RunningTasks)), len(opts.RunningTerminals), pluralize(len(opts.RunningTerminals)), nbGoroutines, pluralize(nbGoroutines))
 	return nil
 }
 
@@ -150,7 +149,7 @@ func (agent *Agent) ackTask(task *Task, taskACK *TaskACK) error {
 	ackURI := fmt.Sprintf("run/agents/%s/tasks/unack/%s/", agent.ID, task.ID)
 	_, err := agent.Client.Delete(ackURI, &taskACK, nil)
 	if err != nil {
-		log.Println(err)
+		logger.Error(err)
 		return err
 	}
 	return nil
@@ -160,14 +159,14 @@ func (agent *Agent) infinitePullTasks() {
 	for {
 		tasks, err := agent.pullTasks()
 		if err != nil {
-			log.Println(err)
+			logger.Errorf("Cannot pull tasks: %+v", err)
 		}
 		if len(tasks) > 0 {
 			tasksID := []string{}
 			for _, t := range tasks {
 				tasksID = append(tasksID, t.ID)
 			}
-			log.Printf("Got %d new tasks %s", len(tasks), strings.Join(tasksID, ", "))
+			logger.Infof("Got %d new tasks %s", len(tasks), strings.Join(tasksID, ", "))
 		}
 		for _, task := range tasks {
 			task.cancelCh = make(chan bool)
@@ -177,12 +176,12 @@ func (agent *Agent) infinitePullTasks() {
 				lock.RUnlock()
 			}
 			go func(t *Task) {
-				log.Println("running task", t.ID)
+				logger.Infof("running task %s", t.ID)
 				err := t.Do()
 				if err != nil {
-					log.Printf("Unable to do task %s: %s", t.ID, err)
+					logger.Errorf("Unable to do task %s: %s", t.ID, err)
 				}
-				log.Printf("task %s done!", t.ID)
+				logger.Infof("task %s done!", t.ID)
 			}(task)
 		}
 		time.Sleep(3 * time.Second)
@@ -194,7 +193,6 @@ func (agent *Agent) pullTasks() ([]*Task, error) {
 	tasks := []*Task{}
 	err := agent.Client.Get(tasksURI, &tasks)
 	if err != nil {
-		log.Println(err)
 		return nil, err
 	}
 	return tasks, nil
@@ -226,10 +224,10 @@ func (agent *Agent) update() error {
 		return err
 	}
 	if v.Version == version {
-		log.Printf("Agent version %s is up to date.", version)
+		logger.Infof("Agent version %s is up to date.", version)
 		return nil
 	}
-	log.Printf("Preparing update from %s to %s", version, v.Version)
+	logger.Infof("Preparing update from %s to %s", version, v.Version)
 	checksum, err := hex.DecodeString(v.BinaryChecksum)
 	if err != nil {
 		return err
@@ -238,13 +236,13 @@ func (agent *Agent) update() error {
 	if err != nil {
 		return err
 	}
-	log.Printf("Downloading %s", v.ArchiveURL)
+	logger.Infof("Downloading %s", v.ArchiveURL)
 	response, err := httpClient.Get(v.ArchiveURL)
 	if err != nil {
 		return err
 	}
 	defer response.Body.Close()
-	log.Printf("Uncompressing run-agent %v update", v.Version)
+	logger.Infof("Uncompressing run-agent %v update", v.Version)
 	gzReader, err := gzip.NewReader(response.Body)
 	if err != nil {
 		return err
@@ -264,14 +262,14 @@ func (agent *Agent) update() error {
 		if header.Name == "run-agent" {
 			go func() {
 				if _, err := io.Copy(binaryWriter, tarReader); err != nil {
-					log.Fatalf("ExtractTarGz: Copy() failed: %s", err.Error())
+					logger.Fatalf("ExtractTarGz: Copy() failed: %s", err.Error())
 				}
 				defer binaryWriter.Close()
 			}()
 			break
 		}
 	}
-	log.Println("Applying update")
+	logger.Infof("Applying update")
 	opts := update.Options{
 		Checksum:  checksum,
 		Signature: signature,
@@ -289,7 +287,7 @@ A5t0SQ22qx1j3A6ozKZpNGTQ8JZCudWza3vuZ9RcjsBfbBZVmWZwqDMYbQ==
 	if errUpdate != nil {
 		return errUpdate
 	}
-	log.Printf("Update done from %s to version %s", version, v.Version)
+	logger.Infof("Update done from %s to version %s", version, v.Version)
 	shutdown(249)
 	return nil
 }

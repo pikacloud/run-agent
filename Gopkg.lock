@@ -87,7 +87,6 @@
   version = "v1.2.0"
 
 [[projects]]
-  branch = "master"
   name = "github.com/inconshreveable/go-update"
   packages = [".","internal/binarydist","internal/osext"]
   revision = "8152e7eb6ccf8679a64582a66b78519688d156ad"
@@ -125,7 +124,7 @@
   branch = "master"
   name = "github.com/pikacloud/gopikacloud"
   packages = ["."]
-  revision = "905a83dba72790fa647f9a8ecf970adbe9e29f5d"
+  revision = "edc5311a832f3321815192681772f8f35376bb91"
 
 [[projects]]
   name = "github.com/pkg/errors"
@@ -214,6 +213,6 @@
 [solve-meta]
   analyzer-name = "dep"
   analyzer-version = 1
-  inputs-digest = "6cf09ed8e4a3fd0052391253b9fc0a6d1b7f514fea1198fd4f38698b24edd7af"
+  inputs-digest = "af415675b4e56fbc44085684d3469af2d970290f340e37ffc1b963e23856b713"
   solver-name = "gps-cdcl"
   solver-version = 1

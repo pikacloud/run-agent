@@ -4,9 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
-	"net/url"
-	"strings"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -30,10 +27,12 @@ type Task struct {
 	Steps         []*TaskStep `json:"payload"`
 	NeedACK       bool        `json:"need_ack"`
 	Stream        bool        `json:"stream"`
+	streamMsg     chan []byte
 	websocketConn *websocket.Conn
 	LogWriter     *io.PipeWriter
 	LogReader     *io.PipeReader
 	cancelCh      chan bool
+	streamer      *Streamer
 }
 
 // TaskACKStep represent a task step ACK
@@ -51,18 +50,13 @@ type TaskACK struct {
 
 func deleteRunningTasks(tid string) {
 	delete(runningTasksList, tid)
-	// for idx, t := range runningTasksList {
-	// 	if t == tid {
-	// 		runningTasksList = runningTasksList[:idx+copy(runningTasksList[idx:], runningTasksList[idx+1:])]
-	// 	}
-	// }
 }
 
 func (task *Task) cancel() error {
-	log.Printf("1/2 Trying to cancel task %s", task.ID)
+	logger.Debugf("1/2 Trying to cancel task %s", task.ID)
 
 	task.cancelCh <- true
-	log.Printf("2/2 Trying to cancel task %s", task.ID)
+	logger.Debugf("2/2 Trying to cancel task %s", task.ID)
 	return nil
 }
 
@@ -81,69 +75,14 @@ func (step *TaskStep) Do() error {
 }
 
 func (step *TaskStep) streamErr(msg string) {
-	if step.Task.Stream && step.Task.websocketConn != nil {
-		step.Task.LogWriter.Write([]byte(fmt.Sprintf("\033[0;31m%s\033[0m", msg)))
-	}
+	step.stream([]byte(fmt.Sprintf("\033[0;31m%s\033[0m", msg)))
 }
 
-func (step *TaskStep) stream(msg string) {
-	if step.Task.Stream && step.Task.websocketConn != nil {
-		_, err := step.Task.LogWriter.Write([]byte(msg))
-		if err != nil {
-			log.Printf("Unable to write to task LogWriter: %s", err)
-		}
+func (step *TaskStep) stream(msg []byte) {
+	select {
+	case step.Task.streamer.msg <- msg:
+	default:
 	}
-}
-
-func (task *Task) streaming() error {
-	r, w := io.Pipe()
-	task.LogReader = r
-	task.LogWriter = w
-
-	wsURLParams := strings.Split(wsURL, "://")
-	scheme := wsURLParams[0]
-	addr := wsURLParams[1]
-	path := fmt.Sprintf("/_ws/hub/log-writer/tid:%s/", task.ID)
-	u := url.URL{Scheme: scheme, Host: addr, Path: path}
-	dialer := websocket.DefaultDialer
-	dialer.HandshakeTimeout = 3 * time.Second
-	c, _, err := dialer.Dial(u.String(), nil)
-	task.websocketConn = c
-	if err != nil {
-		r.Close()
-		w.Close()
-		return fmt.Errorf("Error dialing %s: %s%s", wsURL, path, err)
-	}
-	log.Printf("Task %s connected to %s", task.ID, u.String())
-	go func() {
-		defer func() {
-			r.Close()
-			w.Close()
-			c.Close()
-			log.Printf("Connection closed with %s", c.RemoteAddr())
-		}()
-		for {
-			_, _, err := c.NextReader()
-			if err != nil {
-				log.Println(err)
-				return
-			}
-		}
-	}()
-	go func() {
-		for {
-			buf := make([]byte, 1024)
-			read, err := task.LogReader.Read(buf)
-			if err != nil {
-				break
-			}
-			msg := buf[:read]
-			if read > 0 {
-				c.WriteMessage(websocket.BinaryMessage, []byte(fmt.Sprintf("%s", msg)))
-			}
-		}
-	}()
-	return nil
 }
 
 // Do a task
@@ -153,16 +92,11 @@ func (task *Task) Do() error {
 	ack := TaskACK{}
 	alreadyAcked := false
 	if task.Stream {
-		err := task.streaming()
-		if err != nil {
-			log.Printf("Unable to start stream for task %s: %s", task.ID, err)
-		}
+		task.streamer = &Streamer{}
+		defer task.streamer.destroy()
+		go task.streamer.run(fmt.Sprintf("tid:%s", task.ID), true)
+
 	}
-	defer func() {
-		if task.Stream && task.websocketConn != nil {
-			task.websocketConn.Close()
-		}
-	}()
 	for _, step := range task.Steps {
 		ackStep := TaskACKStep{}
 		ackStep.StartTimestamp = time.Now().Unix()
@@ -170,15 +104,15 @@ func (task *Task) Do() error {
 		if step.AckBeforeCompletion && task.NeedACK {
 			err := agent.ackTask(task, &ack)
 			if err != nil {
-				log.Printf("Unable to ack task %s before running step: %s", task.ID, err)
+				logger.Errorf("Unable to ack task %s before running step: %s", task.ID, err)
 			} else {
-				log.Printf("task %s ACKed before running step", task.ID)
+				logger.Infof("task %s ACKed before running step", task.ID)
 			}
 			alreadyAcked = true
 		}
 		err := step.Do()
 		if err != nil {
-			log.Printf("%s Step %s failed with config %s (%s)", step.Plugin, step.Method, step.PluginConfig, err)
+			logger.Errorf("%s Step %s failed with config %s (%s)", step.Plugin, step.Method, step.PluginConfig, err)
 			ackStep.Message = err.Error()
 			ackStep.Success = false
 			if step.Task.Stream {
@@ -205,9 +139,9 @@ func (task *Task) Do() error {
 	if task.NeedACK && alreadyAcked == false {
 		err := agent.ackTask(task, &ack)
 		if err != nil {
-			log.Printf("Unable to ack task %s: %s", task.ID, err)
+			logger.Errorf("Unable to ack task %s: %s", task.ID, err)
 		} else {
-			log.Printf("task %s ACKed", task.ID)
+			logger.Infof("task %s ACKed", task.ID)
 		}
 	}
 	return nil

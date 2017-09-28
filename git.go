@@ -3,7 +3,6 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"log"
 	"os"
 	"strings"
 
@@ -30,24 +29,24 @@ func (step *TaskStep) Git() error {
 		if errMkdir != nil {
 			return errMkdir
 		}
-		step.stream(fmt.Sprintf("git clone %s\n", cloneOpts.URL))
+		step.stream([]byte(fmt.Sprintf("git clone %s\n", cloneOpts.URL)))
 		cloneOptions := &git.CloneOptions{
 			URL:   cloneOpts.URL,
 			Depth: 1,
 		}
-		if step.Task.Stream && step.Task.websocketConn != nil {
-			cloneOptions.Progress = step.Task.LogWriter
+		if step.Task.Stream {
+			cloneOptions.Progress = step.Task.streamer.ioWriter
 		}
 		repository, errClone := git.PlainClone(cloneOpts.Path, false, cloneOptions)
 		if errClone != nil {
 			os.RemoveAll(cloneOpts.Path)
 			return errClone
 		}
-		log.Printf("%s cloned in %s", cloneOpts.URL, cloneOpts.Path)
+		//log.Printf("%s cloned in %s", cloneOpts.URL, cloneOpts.Path)
 		head, _ := repository.Head()
 		commit, _ := repository.CommitObject(head.Hash())
 		msg := fmt.Sprintf("\n\n%s\n\n", strings.Replace(commit.String(), "\n", "\n\r", -1))
-		step.stream(msg)
+		step.stream([]byte(msg))
 		return nil
 	default:
 		return fmt.Errorf("Unknown step method %s", step.Method)

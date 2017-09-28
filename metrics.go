@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"log"
 	"time"
 
 	"github.com/shirou/gopsutil/cpu"
@@ -105,27 +104,27 @@ func (agent *Agent) basicMetrics() {
 	for {
 		c, err := getCPUInfo()
 		if err != nil {
-			log.Println(err)
+			//log.Println(err)
 		}
 		m, err := getRAMInfo()
 		if err != nil {
-			log.Println(err)
+			// log.Println(err)
 		}
 		s, err := getSWAPInfo()
 		if err != nil {
-			log.Println(err)
+			// log.Println(err)
 		}
 		io, ps, us, err := getDiskInfo()
 		if err != nil {
-			log.Println(err)
+			// log.Println(err)
 		}
 		la, ms, err := getLoadAverage()
 		if err != nil {
-			log.Println(err)
+			// log.Println(err)
 		}
 		ni, ionet, err := getNetInfo()
 		if err != nil {
-			log.Println(err)
+			// log.Println(err)
 		}
 		metrics.CPUStats = c
 		metrics.MemStats = m
