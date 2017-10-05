@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -35,6 +36,7 @@ import (
 	"github.com/moby/moby/pkg/archive"
 	"github.com/moby/moby/pkg/fileutils"
 	"github.com/moby/moby/pkg/jsonmessage"
+	"github.com/moby/moby/pkg/stringid"
 )
 
 // DockerPorts describes docker ports for docker run
@@ -161,15 +163,20 @@ type syncDockerContainersOptions struct {
 	ContainersID []string
 }
 
+type containerLog struct {
+	containerID string
+	msg         []byte
+}
+
 // NewDockerClient creates a new docker client
 func NewDockerClient() *docker_client.Client {
 	dockerClient, err := docker_client.NewEnvClient()
 	if err != nil {
-		panic(err)
+		logger.Fatal(err)
 	}
 	_, err = dockerClient.ServerVersion(context.Background())
 	if err != nil {
-		panic(err)
+		logger.Fatal(err)
 	}
 	return dockerClient
 }
@@ -930,23 +937,79 @@ func (agent *Agent) unsyncDockerContainer(containerID string) error {
 	return nil
 }
 
+func (agent *Agent) containerLogger(container *docker_types.ContainerJSON, containerConfigID string) error {
+	containerLogsOpts := docker_types.ContainerLogsOptions{
+		ShowStdout: true,
+		ShowStderr: true,
+		Follow:     true,
+	}
+	layout := time.RFC3339Nano
+	t, err := time.Parse(layout, container.State.FinishedAt)
+	if err != nil {
+		return err
+	}
+	if !t.IsZero() {
+		containerLogsOpts.Since = container.State.FinishedAt
+	}
+	logger.Debugf("Starting log streamer for %s", container.ID)
+	ctx := context.Background()
+	logReader, err := agent.DockerClient.ContainerLogs(ctx, container.ID, containerLogsOpts)
+	if err != nil {
+		return err
+	}
+
+	go func() {
+		defer func() {
+			logReader.Close()
+			logger.Debugf("Log streamer closed for %s", container.ID)
+		}()
+		scanner := bufio.NewScanner(logReader)
+		for scanner.Scan() {
+			entry := &StreamEntry{
+				Cid:               stringid.TruncateID(container.ID),
+				ContainerConfigID: containerConfigID,
+				Msg:               []byte(scanner.Text()),
+				Aid:               agent.ID,
+			}
+			streamer.writeEntry(entry)
+		}
+	}()
+	return nil
+}
+
 func (agent *Agent) parseContainerEvent(msg docker_types_event.Message) error {
 	containerID := msg.ID
 	switch msg.Action {
+	case "start":
+		i, err := agent.DockerClient.ContainerInspect(context.Background(), containerID)
+		if err != nil {
+			return err
+		}
+		containerConfigID := i.Config.Labels["pikacloud.container.id"]
+		// Stream logs only for pikacloud containers.
+		if containerConfigID == "" {
+			return nil
+		}
+		// Stream logs only if stream logging is enabled in container config
+		if i.Config.Labels["pikacloud.container.stream_logs"] != "true" {
+			logger.Debugf("Container")
+		}
+		agent.containerLogger(&i, containerConfigID)
 	case "destroy":
 		err := agent.unsyncDockerContainer(containerID)
 		if err != nil {
 			return err
 		}
+		return nil
 	default:
 
-		opts := syncDockerContainersOptions{
-			ContainersID: []string{containerID},
-		}
-		err := agent.syncDockerContainers(opts)
-		if err != nil {
-			return err
-		}
+	}
+	opts := syncDockerContainersOptions{
+		ContainersID: []string{containerID},
+	}
+	err := agent.syncDockerContainers(opts)
+	if err != nil {
+		return err
 	}
 	return nil
 }

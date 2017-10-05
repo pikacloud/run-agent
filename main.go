@@ -24,6 +24,8 @@ const (
 )
 
 var (
+	apiToken          string
+	baseURL           string
 	agent             *Agent
 	runningTasksList  map[string]*Task
 	metrics           *Metrics
@@ -40,6 +42,7 @@ var (
 	lock              = sync.RWMutex{}
 	pikacloudClient   *gopikacloud.Client
 	logger            = logrus.New()
+	streamer          *Streamer
 )
 
 // PluginConfig describes a plugin option
@@ -130,8 +133,8 @@ func main() {
 		}()
 	}
 	runningTerminalsList = make(map[*DockerTerminalOpts]bool)
-	apiToken := os.Getenv("PIKACLOUD_API_TOKEN")
-	baseURL := os.Getenv("PIKACLOUD_AGENT_URL")
+	apiToken = os.Getenv("PIKACLOUD_API_TOKEN")
+	baseURL = os.Getenv("PIKACLOUD_AGENT_URL")
 	hostname := os.Getenv("PIKACLOUD_AGENT_HOSTNAME")
 	envLabels := os.Getenv("PIKACLOUD_AGENT_LABELS")
 	wsURLenv := os.Getenv("PIKACLOUD_WS_URL")
@@ -184,6 +187,10 @@ func main() {
 		wg.Wait()
 		pprof.StopCPUProfile()
 	}()
+	streamer = NewStreamer(fmt.Sprintf("aid:%s", agent.ID), true)
+	go streamer.run()
+	defer streamer.destroy()
+
 	wg.Add(1)
 	go agent.infiniteSyncDockerInfo()
 	wg.Add(1)

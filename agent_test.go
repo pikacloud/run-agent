@@ -14,12 +14,14 @@ func createTestAgent() error {
 		testMethod(nil, r, "POST")
 		fmt.Fprintf(w, "{\"aid\": \"toto\", \"hostname\": \"tata\", \"localtime\": %d}", safeLocaltime)
 	})
-	agent = NewAgent("", "tata", nil)
+	agent = NewAgent("foobar", "tata", nil)
 	agent.Client = client
 	err := agent.Register()
 	if err != nil {
 		return err
 	}
+	metrics = &Metrics{}
+	streamer = NewStreamer("foobar", false)
 	return nil
 }
 
@@ -77,7 +79,9 @@ func TestAgentPing(t *testing.T) {
 	if err != nil {
 		t.Errorf("Cannot create agent: %v", err)
 	}
+
 	errPing := agent.Ping()
+
 	if errPing != nil {
 		t.Errorf("Ping test fails: %v", errPing)
 	}

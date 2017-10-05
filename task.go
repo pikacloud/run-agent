@@ -79,10 +79,7 @@ func (step *TaskStep) streamErr(msg string) {
 }
 
 func (step *TaskStep) stream(msg []byte) {
-	select {
-	case step.Task.streamer.msg <- msg:
-	default:
-	}
+	step.Task.streamer.writeRawMsg(msg)
 }
 
 // Do a task
@@ -92,10 +89,9 @@ func (task *Task) Do() error {
 	ack := TaskACK{}
 	alreadyAcked := false
 	if task.Stream {
-		task.streamer = &Streamer{}
+		task.streamer = NewStreamer(fmt.Sprintf("tid:%s", task.ID), true)
 		defer task.streamer.destroy()
-		go task.streamer.run(fmt.Sprintf("tid:%s", task.ID), true)
-
+		go task.streamer.run()
 	}
 	for _, step := range task.Steps {
 		ackStep := TaskACKStep{}

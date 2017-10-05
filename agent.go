@@ -11,8 +11,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Sirupsen/logrus"
 	update "github.com/inconshreveable/go-update"
 	docker_client "github.com/moby/moby/client"
+	"github.com/pikacloud/gopikacloud"
 )
 
 // CreateAgentOptions represents the agent Create() options
@@ -38,12 +40,13 @@ type PingAgentOptions struct {
 type Agent struct {
 	Client       *Client
 	DockerClient *docker_client.Client
-	ID           string   `json:"aid"`
-	PingURL      string   `json:"ping_url"`
-	TTL          int      `json:"ttl"`
-	Hostname     string   `json:"hostname"`
-	Labels       []string `json:"labels"`
-	Localtime    int      `json:"localtime"`
+	ID           string            `json:"aid"`
+	PingURL      string            `json:"ping_url"`
+	TTL          int               `json:"ttl"`
+	Hostname     string            `json:"hostname"`
+	Labels       []string          `json:"labels"`
+	Localtime    int               `json:"localtime"`
+	User         *gopikacloud.User `json:"user"`
 }
 
 func localtime() int {
@@ -141,7 +144,13 @@ func (agent *Agent) Ping() error {
 		return fmt.Errorf("ping to %s returns %d codes", pingURI, status)
 	}
 	nbGoroutines := runtime.NumGoroutine()
-	logger.Debugf("Ping OK (%d running task%s, %d running terminal%s, %d goroutine%s)", len(opts.RunningTasks), pluralize(len(opts.RunningTasks)), len(opts.RunningTerminals), pluralize(len(opts.RunningTerminals)), nbGoroutines, pluralize(nbGoroutines))
+	// logger.Debugf("Ping OK (%d running task%s, %d running terminal%s, %d goroutine%s)", len(opts.RunningTasks), pluralize(len(opts.RunningTasks)), len(opts.RunningTerminals), pluralize(len(opts.RunningTerminals)), nbGoroutines, pluralize(nbGoroutines))
+	logger.WithFields(logrus.Fields{
+		"tasks":         len(opts.RunningTasks),
+		"terminals":     len(opts.RunningTerminals),
+		"goroutines":    nbGoroutines,
+		"containerLogs": fmt.Sprintf("%d/1024", len(streamer.msg)),
+	}).Debug("Ping OK")
 	return nil
 }
 
