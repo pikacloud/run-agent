@@ -937,7 +937,53 @@ func (agent *Agent) unsyncDockerContainer(containerID string) error {
 	return nil
 }
 
-func (agent *Agent) containerLogger(container *docker_types.ContainerJSON, containerConfigID string) error {
+func (agent *Agent) isManagedContainer(containerID string) (bool, error) {
+	container, err := agent.DockerClient.ContainerInspect(context.Background(), containerID)
+	if err != nil {
+		return false, err
+	}
+	expectedLabel := "pikacloud.container.id"
+	containerConfigID := container.Config.Labels[expectedLabel]
+	if containerConfigID == "" {
+		return false, fmt.Errorf("No label pikacloud.container.id")
+	}
+	return true, nil
+}
+
+func (agent *Agent) managedContainers() ([]docker_types.Container, error) {
+	containers, err := agent.DockerClient.ContainerList(context.Background(), docker_types.ContainerListOptions{})
+	if err != nil {
+		return nil, err
+	}
+	managedContainersList := []docker_types.Container{}
+	for _, container := range containers {
+		ok, err := agent.isManagedContainer(container.ID)
+		if err != nil {
+			logger.Errorf("Unable to check if container %s is a managedContainer: %+v", container.ID, err)
+			continue
+		}
+		if !ok {
+			continue
+		}
+		managedContainersList = append(managedContainersList, container)
+	}
+	return managedContainersList, nil
+}
+
+func (agent *Agent) containerLogger(containerID string) error {
+	container, err := agent.DockerClient.ContainerInspect(context.Background(), containerID)
+	if err != nil {
+		return err
+	}
+	containerConfigID := container.Config.Labels["pikacloud.container.id"]
+	// Stream logs only for pikacloud containers.
+	if containerConfigID == "" {
+		return nil
+	}
+	// Stream logs only if stream logging is enabled in container config
+	if container.Config.Labels["pikacloud.container.stream_logs"] != "true" {
+		return nil
+	}
 	containerLogsOpts := docker_types.ContainerLogsOptions{
 		ShowStdout: true,
 		ShowStderr: true,
@@ -981,20 +1027,7 @@ func (agent *Agent) parseContainerEvent(msg docker_types_event.Message) error {
 	containerID := msg.ID
 	switch msg.Action {
 	case "start":
-		i, err := agent.DockerClient.ContainerInspect(context.Background(), containerID)
-		if err != nil {
-			return err
-		}
-		containerConfigID := i.Config.Labels["pikacloud.container.id"]
-		// Stream logs only for pikacloud containers.
-		if containerConfigID == "" {
-			return nil
-		}
-		// Stream logs only if stream logging is enabled in container config
-		if i.Config.Labels["pikacloud.container.stream_logs"] != "true" {
-			logger.Debugf("Container")
-		}
-		agent.containerLogger(&i, containerConfigID)
+		agent.containerLogger(containerID)
 	case "destroy":
 		err := agent.unsyncDockerContainer(containerID)
 		if err != nil {

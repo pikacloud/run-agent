@@ -190,7 +190,14 @@ func main() {
 	streamer = NewStreamer(fmt.Sprintf("aid:%s", agent.ID), true)
 	go streamer.run()
 	defer streamer.destroy()
+	managedContainers, err := agent.managedContainers()
+	if err != nil {
+		logger.Fatal(err)
+	}
 
+	for _, container := range managedContainers {
+		agent.containerLogger(container.ID)
+	}
 	wg.Add(1)
 	go agent.infiniteSyncDockerInfo()
 	wg.Add(1)
