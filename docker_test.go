@@ -63,7 +63,7 @@ func TestDockerContainer(t *testing.T) {
 	if errRun != nil {
 		t.Errorf("Container is not created: %v", err)
 	}
-	errStart := agent.dockerStart(create.ID)
+	errStart := agent.dockerStart(create.ID, 0)
 	if errStart != nil {
 		t.Errorf("Cannot start container: %v", errStart)
 	}

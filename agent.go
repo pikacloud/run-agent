@@ -38,15 +38,18 @@ type PingAgentOptions struct {
 
 // Agent describes the agent
 type Agent struct {
-	Client       *Client
-	DockerClient *docker_client.Client
-	ID           string            `json:"aid"`
-	PingURL      string            `json:"ping_url"`
-	TTL          int               `json:"ttl"`
-	Hostname     string            `json:"hostname"`
-	Labels       []string          `json:"labels"`
-	Localtime    int               `json:"localtime"`
-	User         *gopikacloud.User `json:"user"`
+	Client                *Client
+	DockerClient          *docker_client.Client
+	ID                    string            `json:"aid"`
+	PingURL               string            `json:"ping_url"`
+	TTL                   int               `json:"ttl"`
+	Hostname              string            `json:"hostname"`
+	Labels                []string          `json:"labels"`
+	Localtime             int               `json:"localtime"`
+	User                  *gopikacloud.User `json:"user"`
+	chRegisterContainer   chan string
+	chDeregisterContainer chan string
+	chSyncContainer       chan string
 }
 
 func localtime() int {
@@ -70,10 +73,13 @@ func makeLabels(labels string) []string {
 // NewAgent create a new agent
 func NewAgent(apiToken string, hostname string, labels []string) *Agent {
 	return &Agent{
-		Hostname:     hostname,
-		Client:       NewClient(apiToken),
-		DockerClient: NewDockerClient(),
-		Labels:       labels,
+		Hostname:              hostname,
+		Client:                NewClient(apiToken),
+		DockerClient:          NewDockerClient(),
+		Labels:                labels,
+		chRegisterContainer:   make(chan string),
+		chDeregisterContainer: make(chan string),
+		chSyncContainer:       make(chan string),
 	}
 }
 
@@ -101,22 +107,38 @@ func (agent *Agent) Register() error {
 }
 
 func (agent *Agent) infinitePing() {
+	ticker := time.NewTicker(3 * time.Second).C
 	for {
-		err := agent.Ping()
-		if err != nil {
-			logger.Errorf("Cannot ping %+v", err)
-			logger.Info("Trying to register lost agent")
-			agent.Register()
-			agent.syncDockerContainers(syncDockerContainersOptions{})
-			info, err := agent.DockerClient.Info(context.Background())
+		select {
+		case <-ticker:
+			err := agent.Ping()
 			if err != nil {
-				logger.Errorf("Cannot fetch docker info %+v", err)
-			} else {
-				agent.syncDockerInfo(info)
+				logger.Errorf("Cannot ping %+v", err)
+				logger.Info("Trying to register lost agent")
+				err := agent.Register()
+				if err != nil {
+					logger.Errorf("Unable to register lost agent: %+v", err)
+					continue
+				}
+				errInitTracked := agent.initTrackedContainers()
+				if errInitTracked != nil {
+					logger.Errorf("Unable to init tracked containers: %+v", errInitTracked)
+					continue
+				}
+				errSync := agent.forceSyncTrackedDockerContainers()
+				if err != nil {
+					logger.Errorf("Unable to sync containers: %+v", errSync)
+					continue
+				}
+				info, err := agent.DockerClient.Info(context.Background())
+				if err != nil {
+					logger.Errorf("Cannot fetch docker info %+v", err)
+					continue
+				} else {
+					agent.syncDockerInfo(info)
+				}
 			}
-
 		}
-		time.Sleep(3 * time.Second)
 	}
 }
 
@@ -150,6 +172,7 @@ func (agent *Agent) Ping() error {
 		"terminals":     len(opts.RunningTerminals),
 		"goroutines":    nbGoroutines,
 		"containerLogs": fmt.Sprintf("%d/1024", len(streamer.msg)),
+		"containers":    len(trackedContainers),
 	}).Debug("Ping OK")
 	return nil
 }

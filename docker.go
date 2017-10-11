@@ -37,6 +37,16 @@ import (
 	"github.com/moby/moby/pkg/fileutils"
 	"github.com/moby/moby/pkg/jsonmessage"
 	"github.com/moby/moby/pkg/stringid"
+
+	"github.com/Sirupsen/logrus"
+)
+
+const (
+	defaultContainerStartWait = 3
+)
+
+var (
+	trackedContainers map[string]*AgentContainer
 )
 
 // DockerPorts describes docker ports for docker run
@@ -49,18 +59,19 @@ type DockerPorts struct {
 
 // DockerCreateOpts describes docker run options
 type DockerCreateOpts struct {
-	Name       string            `json:"name"`
-	Remove     bool              `json:"rm"`
-	Ports      []*DockerPorts    `json:"ports"`
-	PublishAll bool              `json:"publish_all"`
-	Command    string            `json:"command"`
-	Entrypoint string            `json:"entrypoint"`
-	Env        []string          `json:"env"`
-	Binds      []string          `json:"binds"`
-	User       string            `json:"user"`
-	WorkingDir string            `json:"working_dir"`
-	Labels     map[string]string `json:"labels"`
-	PullOpts   *DockerPullOpts   `json:"pull_opts"`
+	Name           string            `json:"name"`
+	Remove         bool              `json:"rm"`
+	Ports          []*DockerPorts    `json:"ports"`
+	PublishAll     bool              `json:"publish_all"`
+	Command        string            `json:"command"`
+	Entrypoint     string            `json:"entrypoint"`
+	Env            []string          `json:"env"`
+	Binds          []string          `json:"binds"`
+	User           string            `json:"user"`
+	WorkingDir     string            `json:"working_dir"`
+	Labels         map[string]string `json:"labels"`
+	PullOpts       *DockerPullOpts   `json:"pull_opts"`
+	WaitForRunning int64             `json:"wait_for_running"`
 }
 
 // DockerPingOpts describes the structure to ping docker containers in pikacloud API
@@ -106,7 +117,8 @@ type DockerStopOpts struct {
 
 // DockerStartOpts describes docker start options
 type DockerStartOpts struct {
-	ID string `json:"id"`
+	ID             string `json:"id"`
+	WaitForRunning int64  `json:"wait_for_running"`
 }
 
 // DockerRestartOpts describes docker restart options
@@ -152,11 +164,19 @@ type AgentDockerInfo struct {
 	Info docker_types.Info `json:"info"`
 }
 
+// AgentContainerStartRetry describes the start retry status of container
+type AgentContainerStartRetry struct {
+	FailureCount       int64  `json:"failure_count"`
+	LastError          string `json:"last_error"`
+	LastErrorTimestamp int64  `json:"last_error_timestamp"`
+}
+
 // AgentContainer describes docker container
 type AgentContainer struct {
-	ID        string `json:"cid"`
-	Container string `json:"container"`
-	Config    string `json:"config"`
+	ID                       string                    `json:"cid"`
+	Container                string                    `json:"container"`
+	Config                   string                    `json:"config"`
+	AgentContainerStartRetry *AgentContainerStartRetry `json:"start_retry"`
 }
 
 type syncDockerContainersOptions struct {
@@ -170,6 +190,7 @@ type containerLog struct {
 
 // NewDockerClient creates a new docker client
 func NewDockerClient() *docker_client.Client {
+
 	dockerClient, err := docker_client.NewEnvClient()
 	if err != nil {
 		logger.Fatal(err)
@@ -181,6 +202,70 @@ func NewDockerClient() *docker_client.Client {
 	return dockerClient
 }
 
+func (agent *Agent) trackedContainer(containerID string) (*AgentContainer, error) {
+	containers, err := agent.DockerClient.ContainerList(context.Background(), docker_types.ContainerListOptions{All: true})
+	if err != nil {
+		return nil, err
+	}
+	var c docker_types.Container
+	for _, container := range containers {
+		if container.ID == containerID {
+			c = container
+			break
+		}
+	}
+	if c.ID == "" {
+		return nil, fmt.Errorf("Cannot fetch container %s", containerID)
+	}
+	data, err := json.Marshal(c)
+	if err != nil {
+		return nil, fmt.Errorf("Cannot decode %v", c)
+	}
+	inspect, err := agent.DockerClient.ContainerInspect(context.Background(), c.ID)
+	if err != nil {
+		return nil, fmt.Errorf("Cannot inspect container %v", err)
+	}
+	inspectConfig, err := json.Marshal(inspect)
+	if err != nil {
+		return nil, fmt.Errorf("Cannot decode %v", inspect)
+	}
+
+	ac := &AgentContainer{
+		ID:        c.ID,
+		Container: string(data),
+		Config:    string(inspectConfig),
+	}
+	lock.Lock()
+	if trackedContainers[containerID] == nil {
+		ac.AgentContainerStartRetry = &AgentContainerStartRetry{LastError: "caca"}
+	} else {
+		ac.AgentContainerStartRetry = trackedContainers[containerID].AgentContainerStartRetry
+	}
+	lock.Unlock()
+	return ac, nil
+}
+
+func (agent *Agent) initTrackedContainers() error {
+	trackedContainers = make(map[string]*AgentContainer)
+	containers, err := agent.DockerClient.ContainerList(
+		context.Background(),
+		docker_types.ContainerListOptions{
+			All: true,
+		})
+	if err != nil {
+		return err
+	}
+	for _, container := range containers {
+		trackedContainer, err := agent.trackedContainer(container.ID)
+		if err != nil {
+			logger.Fatal(err)
+		}
+		lock.Lock()
+		trackedContainers[container.ID] = trackedContainer
+		lock.Unlock()
+	}
+	return nil
+}
 func (agent *Agent) dockerPull(opts *DockerPullOpts) error {
 	ctx := context.Background()
 	pullOpts := docker_types.ImagePullOptions{}
@@ -245,13 +330,43 @@ func (agent *Agent) dockerCreate(opts *DockerCreateOpts) (*docker_types_containe
 	return &container, nil
 }
 
-func (agent *Agent) dockerStart(containerID string) error {
+func (agent *Agent) dockerStart(containerID string, waitForRunning int64) error {
 	ctx := context.Background()
 	startOpts := docker_types.ContainerStartOptions{}
 	if err := agent.DockerClient.ContainerStart(ctx, containerID, startOpts); err != nil {
+		if trackedContainers[containerID] != nil {
+			trackedContainers[containerID].AgentContainerStartRetry.LastErrorTimestamp = time.Now().UnixNano()
+			trackedContainers[containerID].AgentContainerStartRetry.LastError = err.Error()
+			trackedContainers[containerID].AgentContainerStartRetry.FailureCount++
+			agent.chSyncContainer <- containerID
+		}
 		return err
 	}
 	logger.Infof("New container started %s", containerID)
+	if waitForRunning > 0 {
+		logger.Debugf("Wait %d seconds for container %s to start", waitForRunning, containerID)
+		time.Sleep(time.Duration(waitForRunning) * time.Second)
+		i, err := agent.DockerClient.ContainerInspect(context.Background(), containerID)
+		if err != nil {
+			return fmt.Errorf("Error inspect newly create container %s: %+v", containerID, err)
+		}
+		if !i.State.Running {
+			if trackedContainers[containerID] != nil {
+				trackedContainers[containerID].AgentContainerStartRetry.LastErrorTimestamp = time.Now().UnixNano()
+				trackedContainers[containerID].AgentContainerStartRetry.LastError = fmt.Sprintf("Container %s exited with code %d", containerID, i.State.ExitCode)
+				trackedContainers[containerID].AgentContainerStartRetry.FailureCount++
+				agent.chSyncContainer <- containerID
+			}
+			return fmt.Errorf("Cannot start container %s, check this container logs", containerID)
+		}
+		if trackedContainers[containerID] != nil {
+			trackedContainers[containerID].AgentContainerStartRetry.LastErrorTimestamp = 0.0
+			trackedContainers[containerID].AgentContainerStartRetry.LastError = ""
+			trackedContainers[containerID].AgentContainerStartRetry.FailureCount = 0
+			agent.chSyncContainer <- containerID
+		}
+
+	}
 	return nil
 }
 
@@ -292,6 +407,17 @@ func (agent *Agent) dockerRestart(containerID string, timeout time.Duration) err
 }
 
 func (agent *Agent) dockerRemove(containerID string, opts *DockerRemoveOpts) error {
+	// first unpause container as we cannot remove a paused container
+	i, err := agent.DockerClient.ContainerInspect(context.Background(), containerID)
+	if err != nil {
+		return fmt.Errorf("Error inspect container %s: %+v", containerID, err)
+	}
+	if i.State.Paused {
+		err := agent.DockerClient.ContainerUnpause(context.Background(), containerID)
+		if err != nil {
+			return fmt.Errorf("Unable to unpause container %s before removal: %+v", containerID, err)
+		}
+	}
 	removeOpts := docker_types.ContainerRemoveOptions{
 		Force:         opts.Force,
 		RemoveVolumes: opts.RemoveVolumes,
@@ -867,73 +993,116 @@ func (agent *Agent) syncDockerInfo(info docker_types.Info) error {
 	return nil
 }
 
-func (agent *Agent) syncDockerContainers(opts syncDockerContainersOptions) error {
-	containersListOpts := docker_types.ContainerListOptions{
-		All: true,
+func (agent *Agent) trackedDockerContainersSyncer() {
+	logger.Debug("Starting docker containers syncer")
+
+	defer func() {
+		logger.Debug("Docker containers syncer exited")
+	}()
+
+	for {
+		select {
+		case containerID := <-agent.chRegisterContainer:
+			trackedContainer, err := agent.trackedContainer(containerID)
+			if err != nil {
+				logger.Errorf("Cannot generate trackerContainer: %+v", err)
+				continue
+			}
+			lock.Lock()
+			trackedContainers[containerID] = trackedContainer
+			lock.Unlock()
+			errSync := agent.syncDockerContainers([]*AgentContainer{trackedContainer})
+			if errSync != nil {
+				logger.Errorf("Cannot sync container %s: %+v", containerID, errSync)
+				agent.forceSyncTrackedDockerContainers()
+				continue
+			}
+			logger.WithFields(logrus.Fields{"cid": containerID}).Debug("Container synced")
+		case containerID := <-agent.chDeregisterContainer:
+			lock.Lock()
+			delete(trackedContainers, containerID)
+			lock.Unlock()
+			err := agent.unsyncDockerContainer(containerID)
+			if err != nil {
+				logger.Errorf("Cannot unsync container %s: %+v", containerID, err)
+				agent.forceSyncTrackedDockerContainers()
+				continue
+			}
+			logger.WithFields(logrus.Fields{"cid": containerID}).Debug("Container unsynced")
+		case containerID := <-agent.chSyncContainer:
+			trackedContainer, err := agent.trackedContainer(containerID)
+			if err != nil {
+				logger.Errorf("Cannot generate trackerContainer: %+v", err)
+				continue
+			}
+			trackedContainers[containerID] = trackedContainer
+			errSync := agent.syncDockerContainers([]*AgentContainer{trackedContainer})
+			if errSync != nil {
+				logger.Errorf("Cannot sync container %s: %+v", containerID, errSync)
+				agent.forceSyncTrackedDockerContainers()
+				continue
+			}
+			logger.WithFields(logrus.Fields{"cid": containerID}).Debug("Container synced (update)")
+		}
 	}
-	var containersCreateList []AgentContainer
-	uri := fmt.Sprintf("run/agents/%s/docker/containers/", agent.ID)
-	containers, err := agent.DockerClient.ContainerList(context.Background(), containersListOpts)
+}
+
+func (agent *Agent) forceSyncTrackedDockerContainers() error {
+	var containers []*AgentContainer
+	for _, container := range trackedContainers {
+		containers = append(containers, container)
+	}
+	err := agent.syncDockerContainers(containers)
 	if err != nil {
 		return err
 	}
-	for _, container := range containers {
-		data, err := json.Marshal(container)
-		if err != nil {
-			logger.Infof("Cannot decode %v", container)
-			continue
-		}
-		if len(opts.ContainersID) > 0 {
-			skip := true
-			for _, c := range opts.ContainersID {
-				if c == container.ID {
-					skip = false
-					break
-				}
-			}
-			if skip {
-				continue
-			}
-		}
-		inspect, err := agent.DockerClient.ContainerInspect(context.Background(), container.ID)
-		if err != nil {
-			logger.Infof("Cannot inspect container %v", err)
-			continue
-		}
-		inspectConfig, err := json.Marshal(inspect)
-		if err != nil {
-			logger.Infof("Cannot decode %v", inspect)
-			continue
-		}
-		containersCreateList = append(containersCreateList,
-			AgentContainer{
-				ID:        container.ID,
-				Container: string(data),
-				Config:    string(inspectConfig),
-			})
-	}
-	if len(containersCreateList) > 0 {
-		status, err := agent.Client.Post(uri, containersCreateList, nil)
-		if err != nil {
-			return err
-		}
-		if status != 200 {
-			return fmt.Errorf("Failed to push docker containers: %d", status)
-		}
-		logger.Infof("Sync docker %d containers of %d OK", len(containersCreateList), len(containers))
-	}
-
 	return nil
-
 }
+
+func (agent *Agent) syncDockerContainers(containers []*AgentContainer) error {
+	uri := fmt.Sprintf("run/agents/%s/docker/containers/", agent.ID)
+	status, err := agent.Client.Post(uri, containers, nil)
+	if err != nil {
+		return err
+	}
+	if status != 200 {
+		return fmt.Errorf("Failed to sync docker containers: %d", status)
+	}
+	return nil
+}
+
+// containersSyncList := []*AgentContainer{}
+// for _, container := range trackedContainers {
+// 	if len(containersID) > 0 {
+// 		if containersID[container.ID] {
+// 			containersSyncList = append(containersSyncList, container)
+// 		}
+// 	} else {
+// 		containersSyncList = append(containersSyncList, container)
+// 	}
+// }
+// if len(containersSyncList) > 0 {
+// 	uri := fmt.Sprintf("run/agents/%s/docker/containers/", agent.ID)
+// 	status, err := agent.Client.Post(uri, containersSyncList, nil)
+// 	if err != nil {
+// 		return err
+// 	}
+// 	if status != 200 {
+// 		return fmt.Errorf("Failed to sync docker containers: %d", status)
+// 	}
+// 	logger.Infof("Sync docker %d containers of %d OK", len(containersSyncList), len(trackedContainers))
+// }
+//
+// return nil
+
+// }
 
 func (agent *Agent) unsyncDockerContainer(containerID string) error {
 	deleteContainerURI := fmt.Sprintf("run/agents/%s/docker/containers/%s/", agent.ID, containerID)
 	_, err := agent.Client.Delete(deleteContainerURI, nil, nil)
 	if err != nil {
-		return err
+		return fmt.Errorf("Cannot delete container %s in API: %+v", containerID, err)
 	}
-	logger.Infof("Container %s garbage collected", containerID)
 	return nil
 }
 
@@ -959,7 +1128,7 @@ func (agent *Agent) managedContainers() ([]docker_types.Container, error) {
 	for _, container := range containers {
 		ok, err := agent.isManagedContainer(container.ID)
 		if err != nil {
-			logger.Errorf("Unable to check if container %s is a managedContainer: %+v", container.ID, err)
+			logger.Debugf("Unable to check if container %s is a managedContainer: %+v", container.ID, err)
 			continue
 		}
 		if !ok {
@@ -970,7 +1139,7 @@ func (agent *Agent) managedContainers() ([]docker_types.Container, error) {
 	return managedContainersList, nil
 }
 
-func (agent *Agent) containerLogger(containerID string) error {
+func (agent *Agent) containerLogger(containerID string, streamFromNow bool) error {
 	container, err := agent.DockerClient.ContainerInspect(context.Background(), containerID)
 	if err != nil {
 		return err
@@ -994,8 +1163,11 @@ func (agent *Agent) containerLogger(containerID string) error {
 	if err != nil {
 		return err
 	}
-	if !t.IsZero() {
+	if !t.IsZero() && !streamFromNow {
 		containerLogsOpts.Since = container.State.FinishedAt
+	}
+	if streamFromNow {
+		containerLogsOpts.Since = time.Now().Format(layout)
 	}
 	logger.Debugf("Starting log streamer for %s", container.ID)
 	ctx := context.Background()
@@ -1026,24 +1198,17 @@ func (agent *Agent) containerLogger(containerID string) error {
 func (agent *Agent) parseContainerEvent(msg docker_types_event.Message) error {
 	containerID := msg.ID
 	switch msg.Action {
+	case "create":
+		agent.chRegisterContainer <- containerID
 	case "start":
-		agent.containerLogger(containerID)
+		agent.chSyncContainer <- containerID
+		agent.containerLogger(containerID, false)
 	case "destroy":
-		err := agent.unsyncDockerContainer(containerID)
-		if err != nil {
-			return err
-		}
-		return nil
+		agent.chDeregisterContainer <- containerID
 	default:
+		agent.chSyncContainer <- containerID
+	}
 
-	}
-	opts := syncDockerContainersOptions{
-		ContainersID: []string{containerID},
-	}
-	err := agent.syncDockerContainers(opts)
-	if err != nil {
-		return err
-	}
 	return nil
 }
 
@@ -1111,7 +1276,8 @@ func (step *TaskStep) Docker() error {
 		if err != nil {
 			return err
 		}
-		if err := agent.dockerStart(containerCreated.ID); err != nil {
+		if err := agent.dockerStart(containerCreated.ID, createOpts.WaitForRunning); err != nil {
+
 			return err
 		}
 
@@ -1164,9 +1330,9 @@ func (step *TaskStep) Docker() error {
 		var startOpts = DockerStartOpts{}
 		err := json.Unmarshal([]byte(step.PluginConfig), &startOpts)
 		if err != nil {
-			return fmt.Errorf("Bad config for docker unpause: %s (%v)", err, step.PluginConfig)
+			return fmt.Errorf("Bad config for docker start: %s (%v)", err, step.PluginConfig)
 		}
-		err = agent.dockerStart(startOpts.ID)
+		err = agent.dockerStart(startOpts.ID, startOpts.WaitForRunning)
 		if err != nil {
 			return err
 		}

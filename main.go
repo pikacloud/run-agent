@@ -106,6 +106,7 @@ func main() {
 			time.Sleep(3 * time.Second)
 		}
 	}
+
 	runningTasksList = make(map[string]*Task)
 	metrics = &Metrics{}
 	killchan := make(chan os.Signal, 2)
@@ -181,7 +182,17 @@ func main() {
 	if err != nil {
 		logger.Fatalf("Unable to register agent: %s", err.Error())
 	}
-	agent.syncDockerContainers(syncDockerContainersOptions{})
+	go agent.trackedDockerContainersSyncer()
+	errTracked := agent.initTrackedContainers()
+	if errTracked != nil {
+		logger.Fatalf("Unable to list containers: %+v", errTracked)
+	}
+	logger.Debugf("%d containers added to watch list", len(trackedContainers))
+	errSync := agent.forceSyncTrackedDockerContainers()
+	if err != nil {
+		logger.Fatalf("Unable to sync containers: %+v", errSync)
+	}
+
 	wg := sync.WaitGroup{}
 	defer func() {
 		wg.Wait()
@@ -196,7 +207,7 @@ func main() {
 	}
 
 	for _, container := range managedContainers {
-		agent.containerLogger(container.ID)
+		agent.containerLogger(container.ID, true)
 	}
 	wg.Add(1)
 	go agent.infiniteSyncDockerInfo()
