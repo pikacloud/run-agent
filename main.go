@@ -189,7 +189,7 @@ func main() {
 	}
 	logger.Debugf("%d containers added to watch list", len(trackedContainers))
 	errSync := agent.forceSyncTrackedDockerContainers()
-	if err != nil {
+	if errSync != nil {
 		logger.Fatalf("Unable to sync containers: %+v", errSync)
 	}
 

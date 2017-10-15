@@ -88,6 +88,7 @@ type ExternalAuthPullOpts struct {
 // DockerPullOpts describes docker pull options
 type DockerPullOpts struct {
 	Image        string                `json:"image"`
+	AlwaysPull   bool                  `json:"always_pull"`
 	ExternalAuth *ExternalAuthPullOpts `json:"external_registry_auth"`
 }
 
@@ -146,6 +147,7 @@ type DockerBuildOpts struct {
 	Path          string `json:"path"`
 	ClearBuildDir bool   `json:"clear_build_dir"`
 	BuildID       string `json:"build_id"`
+	RemoveImage   bool   `json:"remove_image_after_build"`
 }
 
 var (
@@ -498,7 +500,7 @@ func (step *TaskStep) dockerBuild(opts *DockerBuildOpts) error {
 		NoCache:    true,
 		Dockerfile: relDockerfile,
 		Tags:       []string{opts.Tag},
-		Remove:     true,
+		Remove:     opts.RemoveImage,
 		PullParent: true,
 	}
 	buildResponse, err := agent.DockerClient.ImageBuild(ctx, body, buildOpts)
@@ -1268,9 +1270,20 @@ func (step *TaskStep) Docker() error {
 		if err != nil {
 			return fmt.Errorf("Bad config for docker container run: %s (%v)", err, step.PluginConfig)
 		}
-		err = agent.dockerPull(createOpts.PullOpts)
-		if err != nil {
-			return err
+		_, _, errImage := agent.DockerClient.ImageInspectWithRaw(context.Background(), createOpts.PullOpts.Image)
+		if errImage != nil {
+			// no local image, try pulling it
+			err = agent.dockerPull(createOpts.PullOpts)
+			if err != nil {
+				return err
+			}
+		} else {
+			if createOpts.PullOpts.AlwaysPull {
+				err = agent.dockerPull(createOpts.PullOpts)
+				if err != nil {
+					return err
+				}
+			}
 		}
 		containerCreated, err := agent.dockerCreate(&createOpts)
 		if err != nil {
