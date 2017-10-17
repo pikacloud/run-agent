@@ -117,7 +117,9 @@ func (s *Streamer) run() {
 
 func (s *Streamer) destroy() {
 	s.done <- true
-	s.conn.Close()
+	if s.conn != nil {
+		s.conn.Close()
+	}
 }
 
 func (s *Streamer) connectWS(u url.URL) error {
