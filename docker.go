@@ -503,6 +503,7 @@ func (step *TaskStep) dockerBuild(opts *DockerBuildOpts) error {
 		Remove:     opts.RemoveImage,
 		PullParent: true,
 	}
+	step.stream([]byte(fmt.Sprintf("\033[33m[BUILD]\033[0m Building docker image %s\n", opts.Tag)))
 	buildResponse, err := agent.DockerClient.ImageBuild(ctx, body, buildOpts)
 	if err != nil {
 		return err
