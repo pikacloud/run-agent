@@ -284,17 +284,17 @@ func (agent *Agent) update() error {
 	defer binaryWriter.Close()
 	tarReader := tar.NewReader(gzReader)
 	for {
-		header, err := tarReader.Next()
-		if err == io.EOF {
+		header, errTarReader := tarReader.Next()
+		if errTarReader == io.EOF {
 			break
 		}
-		if err != nil {
+		if errTarReader != nil {
 			return err
 		}
 		if header.Name == "run-agent" {
 			go func() {
-				if _, err := io.Copy(binaryWriter, tarReader); err != nil {
-					logger.Fatalf("ExtractTarGz: Copy() failed: %s", err.Error())
+				if _, errIoTar := io.Copy(binaryWriter, tarReader); errIoTar != nil {
+					logger.Fatalf("ExtractTarGz: Copy() failed: %s", errIoTar.Error())
 				}
 				defer binaryWriter.Close()
 			}()

@@ -482,7 +482,7 @@ func (step *TaskStep) dockerBuild(opts *DockerBuildOpts) error {
 	if err != nil {
 		return fmt.Errorf("cannot canonicalize dockerfile path %s: %v", relDockerfile, err)
 	}
-	excludes, err := ReadDockerignore(opts.Path)
+	excludes, _ := ReadDockerignore(opts.Path)
 	excludes = TrimBuildFilesFromExcludes(excludes, relDockerfile, false)
 	tarOptions := &archive.TarOptions{
 		ExcludePatterns: excludes,
@@ -646,6 +646,10 @@ func (agent *Agent) dockerTerminal(opts *DockerTerminalOpts) error {
 	runningTerminalsList[opts] = true
 	defer func() {
 		logger.Info("Defer fx terminal")
+		errDeleteTerminal := terminal.Delete(pikacloudClient)
+		if errDeleteTerminal != nil {
+			logger.Info("Cannot delete terminal in API: %+v", errDeleteTerminal)
+		}
 		data, errInspect := agent.DockerClient.ContainerExecInspect(ctx, execCreateResponse.ID)
 		if errInspect == nil {
 			if data.Running {
@@ -712,11 +716,6 @@ func (agent *Agent) dockerTerminal(opts *DockerTerminalOpts) error {
 		c.Close()
 		logger.Infof("Websocket connection closed %s", opts.Tid)
 		delete(runningTerminalsList, opts)
-		err := terminal.Delete(pikacloudClient)
-		if err != nil {
-			logger.Info("Cannot delete terminal in API: %+v", err)
-		}
-
 		return
 
 	}()
@@ -1240,7 +1239,6 @@ func waitDockerEvents(events <-chan docker_types_event.Message, errs <-chan erro
 			}
 		}
 	}
-	return nil
 }
 
 func (agent *Agent) listenDockerEvents() error {
