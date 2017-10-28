@@ -1216,6 +1216,7 @@ func (agent *Agent) parseContainerEvent(msg docker_types_event.Message) error {
 	case "start":
 		agent.chSyncContainer <- containerID
 		agent.containerLogger(containerID, false)
+		agent.networkCreate(containerID)
 	case "destroy":
 		agent.chDeregisterContainer <- containerID
 	default:

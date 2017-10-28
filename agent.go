@@ -29,11 +29,12 @@ type CreateAgentOptions struct {
 
 // PingAgentOptions represents the agent Ping() options
 type PingAgentOptions struct {
-	Metrics          *Metrics `json:"metrics,omitempty"`
-	RunningTasks     []string `json:"running_tasks,omitempty"`
-	RunningTerminals []string `json:"running_terminals,omitempty"`
-	Localtime        int      `json:"localtime"`
-	NumGoroutines    int      `json:"num_goroutines"`
+	Metrics          *Metrics            `json:"metrics,omitempty"`
+	RunningTasks     []string            `json:"running_tasks,omitempty"`
+	RunningTerminals []string            `json:"running_terminals,omitempty"`
+	Localtime        int                 `json:"localtime"`
+	NumGoroutines    int                 `json:"num_goroutines"`
+	Networks         map[string]*Network `json:"networks,omitempty"`
 }
 
 // Agent describes the agent
@@ -154,6 +155,7 @@ func (agent *Agent) Ping() error {
 	}
 	opts := PingAgentOptions{
 		Metrics:       metrics,
+		Networks:      networks,
 		RunningTasks:  flatRunningTasksList,
 		Localtime:     localtime(),
 		NumGoroutines: runtime.NumGoroutine(),
