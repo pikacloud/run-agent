@@ -137,6 +137,9 @@ func (agent *Agent) infinitePing() {
 				} else {
 					agent.syncDockerInfo(info)
 				}
+				streamer.destroy()
+				streamer = NewStreamer(fmt.Sprintf("aid:%s", agent.ID), true)
+				go streamer.run()
 			}
 		}
 	}
