@@ -25,16 +25,17 @@ type CreateAgentOptions struct {
 	Version   string   `json:"version"`
 	OS        string   `json:"os"`
 	Arch      string   `json:"arch"`
+	IP        string   `json:"ip"`
 }
 
 // PingAgentOptions represents the agent Ping() options
 type PingAgentOptions struct {
-	Metrics          *Metrics            `json:"metrics,omitempty"`
-	RunningTasks     []string            `json:"running_tasks,omitempty"`
-	RunningTerminals []string            `json:"running_terminals,omitempty"`
-	Localtime        int                 `json:"localtime"`
-	NumGoroutines    int                 `json:"num_goroutines"`
-	Networks         map[string]*Network `json:"networks,omitempty"`
+	Metrics          *Metrics `json:"metrics,omitempty"`
+	RunningTasks     []string `json:"running_tasks,omitempty"`
+	RunningTerminals []string `json:"running_terminals,omitempty"`
+	Localtime        int      `json:"localtime"`
+	NumGoroutines    int      `json:"num_goroutines"`
+	//Networks         map[string]*Network `json:"networks,omitempty"`
 }
 
 // Agent describes the agent
@@ -86,12 +87,23 @@ func NewAgent(apiToken string, hostname string, labels []string) *Agent {
 
 // Register an agent
 func (agent *Agent) Register() error {
+	//req, err := http.Get("https://ifconfig.co/")
+	//if err != nil {
+	//	return err
+	//}
+	//defer req.Body.Close()
+	//ip, err2 := ioutil.ReadAll(req.Body)
+	//if err2 != nil {
+	//	return err2
+	//}
+	ip := "86.252.51.32"
 	opt := CreateAgentOptions{
 		Hostname:  agent.Hostname,
 		Localtime: localtime(),
 		Version:   version,
 		OS:        runtime.GOOS,
 		Arch:      runtime.GOARCH,
+		IP:        strings.TrimSpace(string(ip)),
 	}
 	if len(agent.Labels) > 0 {
 		opt.Labels = agent.Labels
@@ -154,8 +166,8 @@ func (agent *Agent) Ping() error {
 		flatRunningTasksList = append(flatRunningTasksList, k)
 	}
 	opts := PingAgentOptions{
-		Metrics:       metrics,
-		Networks:      networks,
+		Metrics: metrics,
+		//Networks:      networks,
 		RunningTasks:  flatRunningTasksList,
 		Localtime:     localtime(),
 		NumGoroutines: runtime.NumGoroutine(),

@@ -10,8 +10,7 @@ import (
 
 // Network describe the network view
 type Network struct {
-	Domain string `json:"domain,omitempty"`
-	CIDR   string `json:"cidr,omitempty"`
+	containersID []string `json:"containersid,omitempty"`
 }
 
 // NetworkCreateOpts describes the network create struct
@@ -45,14 +44,13 @@ type NetworkDetachOpts struct {
 	Container string `json:"container"`
 }
 
-func (agent *Agent) checkSuperNetwork() error {
+func (agent *Agent) checkSuperNetwork(MasterIP string) error {
 	ctx := context.Background()
 	command, err := parseCommandLine("/bin/ps aux")
 	if err != nil {
 		return fmt.Errorf("Error creating Network: %s", err)
 	}
 	output, err2 := exec.CommandContext(ctx, command[0], command[1:]...).Output()
-	//output, err := exec.CommandContext(ctx, "/bin/ps aux").Output()
 	if err2 != nil {
 		return fmt.Errorf("Error creating Network: %s", err)
 	}
@@ -70,74 +68,84 @@ func (agent *Agent) checkSuperNetwork() error {
 		if err != nil {
 			return fmt.Errorf("Error creating Network: %s", err)
 		}
+		if len(MasterIP) > 0 {
+			command3 := fmt.Sprintf("%s connect %s",
+				"/usr/local/bin/weave", MasterIP)
+			//createOpts.Command, createOpts.Password, createOpts.CIDR, createOpts.Domain, createOpts.ExtraOpts)
+			command, err = parseCommandLine(command3)
+			if err != nil {
+				return fmt.Errorf("Error creating Network: %s", err)
+			}
+			err = exec.CommandContext(ctx, command[0], command[1:]...).Run()
+			if err != nil {
+				return fmt.Errorf("Error creating Network: %s", err)
+			}
+		}
 	}
 	return nil
 }
 
-func addNewCIDR(net *Network) {
-	var check = true
-	for _, value := range networks {
-		if value.CIDR == net.CIDR {
-			check = false
-		}
-	}
-	if check == true {
-		networks[net.CIDR] = net
-	}
-}
+//func removeDuplicates(elements []string) []string {
+//	encountered := map[string]bool{}
 
-// networkCreate describes available methods of the Network plugin
-func (agent *Agent) networkCreate(containerID string) error {
+// Create a map of all unique elements.
+//	for v := range elements {
+//		encountered[elements[v]] = true
+//	}
+
+// Place all keys from the map into a slice.
+//	result := []string{}
+//	for key, _ := range encountered {
+//		result = append(result, key)
+//	}
+//	return result
+//}
+
+//func addNewCIDR(net *Network, label string) {
+//	var check = true
+//	for key, _ := range networks {
+//		if key == label {
+//			check = false
+///		list := append(networks[key].containersID, net.containersID...)
+//		networks[key].containersID = removeDuplicates(list)
+//		}
+//	}
+//	if check == true {
+//		networks[label] = net
+//	}
+//}
+
+// attachNetwork describes available methods of the Network plugin
+func (agent *Agent) attachNetwork(containerID string, Networks []string, MasterIP string) error {
 	ctx := context.Background()
 
-	container, err := agent.DockerClient.ContainerInspect(context.Background(), containerID)
-	if err != nil {
-		return err
-	}
-	fmt.Println("step 1")
-	containerConfigID := container.Config.Labels["pikacloud.container.id"]
-	// Stream logs only for pikacloud containers.
-	if containerConfigID == "" {
-		return nil
-	}
-	containerNetworks := container.Config.Labels["pikacloud.container.networks"]
-	//containerDomains := container.Config.Domains
-	if len(containerNetworks) == 0 {
+	if len(Networks) == 0 {
 		return nil
 	}
 	fmt.Println("step 2")
-	test := agent.checkSuperNetwork()
+	test := agent.checkSuperNetwork(MasterIP)
 	fmt.Println("step 3")
 	if test == nil {
 		fmt.Println("Step 4")
-		//for _, network := range containerNetworks {
-		command := fmt.Sprintf("%s attach net:%s %s",
-			"/usr/local/bin/weave", string(containerNetworks), containerID)
-		//attachOpts.Command, attachOpts.CIDR, attachOpts.Container)
-		cmd2, err2 := parseCommandLine(command)
-		if err2 != nil {
-			return fmt.Errorf("Error creating Network: %s", err2)
+		for _, network := range Networks {
+			command := fmt.Sprintf("%s attach net:%s %s",
+				"/usr/local/bin/weave", string(network), containerID)
+			cmd2, err2 := parseCommandLine(command)
+			if err2 != nil {
+				return fmt.Errorf("Error creating Network: %s", err2)
+			}
+			fmt.Println("Step 5")
+			cmd := exec.CommandContext(ctx, cmd2[0], cmd2[1:]...)
+			err := cmd.Run()
+			if err != nil {
+				return fmt.Errorf("Error attaching container to network: %s", err)
+			}
+			fmt.Println("Step 3")
+			//net := new(Network)
+			//net.containersID = append(net.containersID, containerID)
+			//		addNewCIDR(net, network)
+			fmt.Println("Step 4")
 		}
-		fmt.Println("Step 5")
-		cmd3 := exec.Command("/usr/bin/docker", "ps")
-		output2, err2 := cmd3.Output()
-		fmt.Println(output2)
-		fmt.Println(err2)
-		if err2 != nil {
-			return fmt.Errorf("Error attaching container to network: %s", err2)
-		}
-		cmd := exec.CommandContext(ctx, cmd2[0], cmd2[1:]...)
-		err = cmd.Run()
-		if err != nil {
-			return fmt.Errorf("Error attaching container to network: %s", err)
-		}
-		fmt.Println("Step 3")
-		net := new(Network)
-		net.CIDR = string(containerNetworks)
-		net.Domain = fmt.Sprintf("%s.local", string(containerNetworks))
-		addNewCIDR(net)
-		fmt.Println("Step 4")
-		//}
 	}
 
 	return nil
