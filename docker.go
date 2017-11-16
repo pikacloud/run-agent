@@ -87,9 +87,10 @@ type ExternalAuthPullOpts struct {
 
 // DockerPullOpts describes docker pull options
 type DockerPullOpts struct {
-	Image        string                `json:"image"`
-	AlwaysPull   bool                  `json:"always_pull"`
-	ExternalAuth *ExternalAuthPullOpts `json:"external_registry_auth"`
+	Image                string                `json:"image"`
+	AlwaysPull           bool                  `json:"always_pull"`
+	ExternalAuth         *ExternalAuthPullOpts `json:"external_registry_auth"`
+	InternalRegistryAuth bool                  `json:"internal_registry_auth"`
 }
 
 func (e *ExternalAuthPullOpts) registryAuthString(aid string) string {
@@ -97,6 +98,12 @@ func (e *ExternalAuthPullOpts) registryAuthString(aid string) string {
 	k := fernet.MustDecodeKeys(key)
 	password := fernet.VerifyAndDecrypt([]byte(e.Password), 60*time.Second, k)
 	data := []byte(fmt.Sprintf("{\"username\": \"%s\", \"password\": \"%s\"}", e.Login, string(password)))
+	str := base64.StdEncoding.EncodeToString(data)
+	return str
+}
+
+func (agent *Agent) internalRegistryAuthString() string {
+	data := []byte(fmt.Sprintf("{\"username\": \"%s\", \"password\": \"%s\"}", agent.User.Email, apiToken))
 	str := base64.StdEncoding.EncodeToString(data)
 	return str
 }
@@ -271,8 +278,12 @@ func (agent *Agent) initTrackedContainers() error {
 func (agent *Agent) dockerPull(opts *DockerPullOpts) error {
 	ctx := context.Background()
 	pullOpts := docker_types.ImagePullOptions{}
-	if opts.ExternalAuth != nil {
-		pullOpts.RegistryAuth = opts.ExternalAuth.registryAuthString(agent.ID)
+	if opts.InternalRegistryAuth {
+		pullOpts.RegistryAuth = agent.internalRegistryAuthString()
+	} else {
+		if opts.ExternalAuth != nil {
+			pullOpts.RegistryAuth = opts.ExternalAuth.registryAuthString(agent.ID)
+		}
 	}
 	out, err := agent.DockerClient.ImagePull(ctx, opts.Image, pullOpts)
 	if err != nil {
