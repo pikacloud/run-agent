@@ -448,6 +448,11 @@ func (agent *Agent) dockerRestart(containerID string, timeout time.Duration) err
 		return err
 	}
 	logger.Infof("Container %s restarted", containerID)
+	if len(networks[containerID]) > 0 {
+		if err := agent.attachNetwork(containerID, networks[containerID], ""); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 

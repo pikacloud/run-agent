@@ -20,10 +20,7 @@ func (agent *Agent) detachNetwork(containerID string, Networks []string) error {
 			return fmt.Errorf("Error parsing command line (detach): %s", err2)
 		}
 		cmd := exec.CommandContext(ctx, cmd2[0], cmd2[1:]...)
-		err := cmd.Run()
-		if err != nil {
-			return fmt.Errorf("Error detaching container from network: %s", err)
-		}
+		cmd.Run()
 	}
 
 	return nil
@@ -133,6 +130,7 @@ func getNewNets(nets []string, containerID string) ([]string, error) {
 // attachNetwork describes available methods of the Network plugin
 func (agent *Agent) attachNetwork(containerID string, Networks []string, MasterIP string) error {
 	ctx := context.Background()
+	fmt.Println("coucou")
 
 	test := agent.checkSuperNetwork(MasterIP)
 	if test == nil {
@@ -143,6 +141,9 @@ func (agent *Agent) attachNetwork(containerID string, Networks []string, MasterI
 			if erro != nil {
 				return erro
 			}
+		}
+		if len(newNets) == 0 {
+			newNets = Networks
 		}
 		for _, network := range newNets {
 			command := fmt.Sprintf("%s attach net:%s %s",
