@@ -7,6 +7,8 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
+	"io/ioutil"
+	"net/http"
 	"runtime"
 	"strings"
 	"time"
@@ -35,7 +37,6 @@ type PingAgentOptions struct {
 	RunningTerminals []string `json:"running_terminals,omitempty"`
 	Localtime        int      `json:"localtime"`
 	NumGoroutines    int      `json:"num_goroutines"`
-	//Networks         map[string]*Network `json:"networks,omitempty"`
 }
 
 // Agent describes the agent
@@ -87,16 +88,15 @@ func NewAgent(apiToken string, hostname string, labels []string) *Agent {
 
 // Register an agent
 func (agent *Agent) Register() error {
-	//req, err := http.Get("https://ifconfig.co/")
-	//if err != nil {
-	//	return err
-	//}
-	//defer req.Body.Close()
-	//ip, err2 := ioutil.ReadAll(req.Body)
-	//if err2 != nil {
-	//	return err2
-	//}
-	ip := "86.252.51.32"
+	req, err := http.Get("https://api.ipify.org")
+	if err != nil {
+		return err
+	}
+	defer req.Body.Close()
+	ip, err2 := ioutil.ReadAll(req.Body)
+	if err2 != nil {
+		return err2
+	}
 	opt := CreateAgentOptions{
 		Hostname:  agent.Hostname,
 		Localtime: localtime(),
@@ -166,8 +166,7 @@ func (agent *Agent) Ping() error {
 		flatRunningTasksList = append(flatRunningTasksList, k)
 	}
 	opts := PingAgentOptions{
-		Metrics: metrics,
-		//Networks:      networks,
+		Metrics:       metrics,
 		RunningTasks:  flatRunningTasksList,
 		Localtime:     localtime(),
 		NumGoroutines: runtime.NumGoroutine(),

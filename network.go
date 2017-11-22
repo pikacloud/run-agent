@@ -8,143 +8,154 @@ import (
 	"strings"
 )
 
-// Network describe the network view
-type Network struct {
-	containersID []string `json:"containersid,omitempty"`
-}
+// detachNetwork describes available methods of the Network plugin
+func (agent *Agent) detachNetwork(containerID string, Networks []string) error {
+	ctx := context.Background()
 
-// NetworkCreateOpts describes the network create struct
-type NetworkCreateOpts struct {
-	Domain    string `json:"domain"`
-	Command   string `json:"command"`
-	CIDR      string `json:"cidr"`
-	ExtraOpts string `json:"extraopts"`
-	Password  string `json:"password"`
-}
+	for _, network := range Networks {
+		command := fmt.Sprintf("%s detach net:%s %s",
+			"/usr/local/bin/weave", string(network), containerID)
+		cmd2, err2 := parseCommandLine(command)
+		if err2 != nil {
+			return fmt.Errorf("Error parsing command line (detach): %s", err2)
+		}
+		cmd := exec.CommandContext(ctx, cmd2[0], cmd2[1:]...)
+		err := cmd.Run()
+		if err != nil {
+			return fmt.Errorf("Error detaching container from network: %s", err)
+		}
+	}
 
-// NetworkConnectOpts describes the network connect struct
-type NetworkConnectOpts struct {
-	Command string `json:"command"`
-	IP      string `json:"ip"`
-}
-
-// NetworkAttachOpts describes the network attach struct
-type NetworkAttachOpts struct {
-	Domain    string `json:"domain"`
-	CIDR      string `json:"cidr"`
-	Command   string `json:"command"`
-	Container string `json:"container"`
-}
-
-// NetworkDetachOpts describes the network detach struct
-type NetworkDetachOpts struct {
-	Domain    string `json:"domain"`
-	CIDR      string `json:"cidr"`
-	Command   string `json:"command"`
-	Container string `json:"container"`
+	return nil
 }
 
 func (agent *Agent) checkSuperNetwork(MasterIP string) error {
 	ctx := context.Background()
 	command, err := parseCommandLine("/bin/ps aux")
 	if err != nil {
-		return fmt.Errorf("Error creating Network: %s", err)
+		return fmt.Errorf("Error parsing command line (checking): %s", err)
 	}
 	output, err2 := exec.CommandContext(ctx, command[0], command[1:]...).Output()
 	if err2 != nil {
-		return fmt.Errorf("Error creating Network: %s", err)
+		return fmt.Errorf("Error checking Network: %s", err)
 	}
 	test := string(output)
 	process := strings.Contains(test, "weave")
+
 	if process != true {
 		command2 := fmt.Sprintf("%s launch --password=%s --ipalloc-range %s --dns-domain=%s %s",
-			"/usr/local/bin/weave", "toto", "10.42.0.0/16", "pikacloud.local", "--plugin=false --proxy=false --dns-ttl=10")
-		//createOpts.Command, createOpts.Password, createOpts.CIDR, createOpts.Domain, createOpts.ExtraOpts)
+			"/usr/local/bin/weave", "e29f169168f64368a32920e3ce041826", "10.42.0.0/16", "pikacloud.local", "--plugin=false --proxy=false --dns-ttl=10")
 		command, err = parseCommandLine(command2)
 		if err != nil {
-			return fmt.Errorf("Error creating Network: %s", err)
+			return fmt.Errorf("Error parsing command line (create): %s", err)
 		}
 		err = exec.CommandContext(ctx, command[0], command[1:]...).Run()
 		if err != nil {
 			return fmt.Errorf("Error creating Network: %s", err)
 		}
-		if len(MasterIP) > 0 {
-			command3 := fmt.Sprintf("%s connect %s",
+	}
+
+	if len(MasterIP) > 0 {
+		command2 := "/usr/local/bin/weave status peers"
+		command, err = parseCommandLine(command2)
+		if err != nil {
+			return fmt.Errorf("Error parsing command line (check peers): %s", err)
+		}
+		output, err = exec.CommandContext(ctx, command[0], command[1:]...).Output()
+		if err != nil {
+			return fmt.Errorf("Error checking connect state: %s", err)
+		}
+		if strings.Count(string(output), "\n") <= 2 {
+			command2 = fmt.Sprintf("%s connect %s",
 				"/usr/local/bin/weave", MasterIP)
-			//createOpts.Command, createOpts.Password, createOpts.CIDR, createOpts.Domain, createOpts.ExtraOpts)
-			command, err = parseCommandLine(command3)
+			command, err = parseCommandLine(command2)
 			if err != nil {
-				return fmt.Errorf("Error creating Network: %s", err)
+				return fmt.Errorf("Error parsing command line (connect): %s", err)
 			}
 			err = exec.CommandContext(ctx, command[0], command[1:]...).Run()
 			if err != nil {
-				return fmt.Errorf("Error creating Network: %s", err)
+				return fmt.Errorf("Error connecting Peer: %s", err)
 			}
 		}
 	}
 	return nil
 }
 
-//func removeDuplicates(elements []string) []string {
-//	encountered := map[string]bool{}
+func difference(slice1 []string, slice2 []string) []string {
+	var diff []string
+	for i := 0; i < 2; i++ {
+		for _, s1 := range slice1 {
+			found := false
+			for _, s2 := range slice2 {
+				if s1 == s2 {
+					found = true
+					break
+				}
+			}
+			if !found {
+				diff = append(diff, s1)
+			}
+		}
+		if i == 0 {
+			slice1, slice2 = slice2, slice1
+		}
+	}
+	return diff
+}
 
-// Create a map of all unique elements.
-//	for v := range elements {
-//		encountered[elements[v]] = true
-//	}
+func stringInSlice(a string, list []string) bool {
+	for _, b := range list {
+		if b == a {
+			return true
+		}
+	}
+	return false
+}
 
-// Place all keys from the map into a slice.
-//	result := []string{}
-//	for key, _ := range encountered {
-//		result = append(result, key)
-//	}
-//	return result
-//}
+// getNewNets disconnect from old networks and prepare the new list of Nets
+func getNewNets(nets []string, containerID string) ([]string, error) {
+	var ret []string
+	var delete []string
+	diff := difference(nets, networks[containerID])
 
-//func addNewCIDR(net *Network, label string) {
-//	var check = true
-//	for key, _ := range networks {
-//		if key == label {
-//			check = false
-///		list := append(networks[key].containersID, net.containersID...)
-//		networks[key].containersID = removeDuplicates(list)
-//		}
-//	}
-//	if check == true {
-//		networks[label] = net
-//	}
-//}
+	for i, net := range diff {
+		if stringInSlice(net, networks[containerID]) {
+			delete = append(delete, net)
+			ret = append(diff[:i], diff[i+1:]...)
+		}
+	}
+	if err := agent.detachNetwork(containerID, delete); err != nil {
+		return nil, fmt.Errorf("Error detaching Container from Network: %s", err)
+	}
+	return ret, nil
+}
 
 // attachNetwork describes available methods of the Network plugin
 func (agent *Agent) attachNetwork(containerID string, Networks []string, MasterIP string) error {
 	ctx := context.Background()
 
-	if len(Networks) == 0 {
-		return nil
-	}
-	fmt.Println("step 2")
 	test := agent.checkSuperNetwork(MasterIP)
-	fmt.Println("step 3")
 	if test == nil {
-		fmt.Println("Step 4")
-		for _, network := range Networks {
+		newNets := Networks
+		if _, ok := networks[containerID]; ok {
+			var erro error
+			newNets, erro = getNewNets(Networks, containerID)
+			if erro != nil {
+				return erro
+			}
+		}
+		for _, network := range newNets {
 			command := fmt.Sprintf("%s attach net:%s %s",
 				"/usr/local/bin/weave", string(network), containerID)
 			cmd2, err2 := parseCommandLine(command)
 			if err2 != nil {
 				return fmt.Errorf("Error creating Network: %s", err2)
 			}
-			fmt.Println("Step 5")
 			cmd := exec.CommandContext(ctx, cmd2[0], cmd2[1:]...)
 			err := cmd.Run()
 			if err != nil {
 				return fmt.Errorf("Error attaching container to network: %s", err)
 			}
-			fmt.Println("Step 3")
-			//net := new(Network)
-			//net.containersID = append(net.containersID, containerID)
-			//		addNewCIDR(net, network)
-			fmt.Println("Step 4")
 		}
 	}
 
@@ -206,96 +217,3 @@ func parseCommandLine(command string) ([]string, error) {
 	}
 	return args, nil
 }
-
-/*
-	switch step.Method {
-	case "create":
-		var createOpts = NetworkCreateOpts{}
-		err := json.Unmarshal([]byte(step.PluginConfig), &createOpts)
-		if err != nil {
-			return fmt.Errorf("Bad config for create_task: %s (%v)", err, step.PluginConfig)
-		}
-		command := fmt.Sprintf("%s launch --password=%s --ipalloc-range %s --dns-domain=%s %s",
-			createOpts.Command, createOpts.Password, createOpts.CIDR, createOpts.Domain, createOpts.ExtraOpts)
-		cmd := exec.Command(command)
-		err = cmd.Run()
-		if err != nil {
-			return fmt.Errorf("Error creating Network: %s", err)
-		}
-		return nil
-	case "connect":
-		var connectOpts = NetworkConnectOpts{}
-		err := json.Unmarshal([]byte(step.PluginConfig), &connectOpts)
-		if err != nil {
-			return fmt.Errorf("Bad config for connect_task: %s (%v)", err, step.PluginConfig)
-		}
-		command := fmt.Sprintf("%s connect %s", connectOpts.Command, connectOpts.IP)
-		cmd := exec.Command(command)
-		err = cmd.Run()
-		if err != nil {
-			fmt.Printf("Error connecting Network: %s", err)
-		}
-		return nil
-	case "disconnect":
-		command := "/usr/local/bin/weave stop"
-		cmd := exec.Command(command)
-		err := cmd.Run()
-		if err != nil {
-			return fmt.Errorf("Error stopping Peer: %s", err)
-		}
-		command = "/usr/local/bin/weave reset --force"
-		cmd = exec.Command(command)
-		err = cmd.Run()
-		if err != nil {
-			return fmt.Errorf("Error deleting Peer: %s", err)
-		}
-		return nil
-	case "attach":
-		var attachOpts = NetworkAttachOpts{}
-		network := new(Network)
-		err := json.Unmarshal([]byte(step.PluginConfig), &attachOpts)
-		if err != nil {
-			return fmt.Errorf("Bad config for attach_task: %s (%v)", err, step.PluginConfig)
-		}
-		command := fmt.Sprintf("%s attach net:%s %s", attachOpts.Command, attachOpts.CIDR, attachOpts.Container)
-		cmd := execmsg.Action.Command(command)
-		err = cmd.Run()
-		if err != nil {
-			return fmt.Errorf("Error attaching container to network: %s", err)
-		}
-		network.CIDR = attachOpts.CIDR
-		network.Domain = attachOpts.Domain
-		//if !networks[network.CIDR] {
-		//	networks[network.CIDR] = &network
-		//}
-		//command = fmt.Sprintf("%s dns-add %s -h %s.%s", attachOpts.Command, attachOpts.Container, attachOpts.Container, attachOpts.Domain)
-		//cmd = exec.Command(command)
-		//err = cmd.Run()
-		//if err != nil {
-		//	fmt.Printf("Error adding container to DNS: %s", err)
-		//}
-		return nil
-	case "detach":
-		var detachOpts = NetworkDetachOpts{}
-		err := json.Unmarshal([]byte(step.PluginConfig), &detachOpts)
-		if err != nil {
-			return fmt.Errorf("Bad config for detach_task: %s (%v)", err, step.PluginConfig)
-		}
-		command := fmt.Sprintf("%s detach %s", detachOpts.Command, detachOpts.Container)
-		cmd := exec.Command(command)
-		err = cmd.Run()
-		if err != nil {
-			return fmt.Errorf("Error detaching container from network: %s", err)
-		}
-		//command = fmt.Sprintf("%s dns-remove %s -h %s.%s", detachOpts.Command, detachOpts.Container, detachOpts.Container, detachOpts.Domain)
-		//cmd = exec.Command(command)
-		//err = cmd.Run()
-		//if err != nil {
-		//		return fmt.Errorf("Error deleting container from DNS: %s", err)
-		//}
-		return nil
-	default:
-		return fmt.Errorf("Unknown step method %s", step.Method)
-	}
-}
-*/
