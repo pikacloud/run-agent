@@ -126,7 +126,6 @@ func (client *Client) PostOrPutOrDelete(method, path string, payload, val interf
 	if err != nil {
 		return 0, err
 	}
-
 	if err = json.Unmarshal([]byte(body), &val); err != nil {
 		return 0, err
 	}

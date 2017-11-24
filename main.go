@@ -29,6 +29,7 @@ var (
 	agent             *Agent
 	runningTasksList  map[string]*Task
 	metrics           *Metrics
+	networks          map[string][]string
 	cpuprofile        = flag.String("cpuprofile", "", "write cpu profile to file")
 	showVersion       = flag.Bool("version", false, "show version")
 	showLatestVersion = flag.Bool("latest", false, "show latest version available")
@@ -109,6 +110,7 @@ func main() {
 
 	runningTasksList = make(map[string]*Task)
 	metrics = &Metrics{}
+	networks = make(map[string][]string)
 	killchan := make(chan os.Signal, 2)
 	signal.Notify(killchan, syscall.SIGINT, syscall.SIGTERM)
 
