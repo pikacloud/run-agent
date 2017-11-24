@@ -130,7 +130,6 @@ func getNewNets(nets []string, containerID string) ([]string, error) {
 // attachNetwork describes available methods of the Network plugin
 func (agent *Agent) attachNetwork(containerID string, Networks []string, MasterIP string) error {
 	ctx := context.Background()
-	fmt.Println("coucou")
 
 	test := agent.checkSuperNetwork(MasterIP)
 	if test == nil {
