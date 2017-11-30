@@ -72,7 +72,7 @@ type DockerCreateOpts struct {
 	Labels         map[string]string `json:"labels"`
 	PullOpts       *DockerPullOpts   `json:"pull_opts"`
 	WaitForRunning int64             `json:"wait_for_running"`
-	Networks       []string          `json:"networks"`
+	Networks       map[string]string `json:"networks"`
 	MasterIP       string            `json:"masterip"`
 }
 
@@ -122,16 +122,16 @@ type DockerPauseOpts struct {
 
 // DockerStopOpts describes docker stop options
 type DockerStopOpts struct {
-	ID       string   `json:"id"`
-	Networks []string `json:"networks"`
+	ID       string            `json:"id"`
+	Networks map[string]string `json:"networks"`
 }
 
 // DockerStartOpts describes docker start options
 type DockerStartOpts struct {
-	ID             string   `json:"id"`
-	WaitForRunning int64    `json:"wait_for_running"`
-	Networks       []string `json:"networks"`
-	MasterIP       string   `json:"masterip"`
+	ID             string            `json:"id"`
+	WaitForRunning int64             `json:"wait_for_running"`
+	Networks       map[string]string `json:"networks"`
+	MasterIP       string            `json:"masterip"`
 }
 
 // DockerRestartOpts describes docker restart options
@@ -363,7 +363,7 @@ func (agent *Agent) dockerCreate(opts *DockerCreateOpts) (*docker_types_containe
 	return &container, nil
 }
 
-func (agent *Agent) dockerStart(containerID string, waitForRunning int64, Networks []string, MasterIP string) error {
+func (agent *Agent) dockerStart(containerID string, waitForRunning int64, Networks map[string]string, MasterIP string) error {
 	ctx := context.Background()
 	startOpts := docker_types.ContainerStartOptions{}
 	if err := agent.DockerClient.ContainerStart(ctx, containerID, startOpts); err != nil {
@@ -377,10 +377,29 @@ func (agent *Agent) dockerStart(containerID string, waitForRunning int64, Networ
 	}
 	logger.Infof("New container started %s", containerID)
 	if len(Networks) > 0 {
-		if err := agent.attachNetwork(containerID, Networks, MasterIP); err != nil {
+		containers, err := agent.DockerClient.ContainerList(ctx, docker_types.ContainerListOptions{All: true})
+		if err != nil {
 			return err
 		}
-		networks[containerID] = Networks
+		Name := ""
+		for _, container := range containers {
+			if container.ID == containerID {
+				temp := strings.Split(container.Names[0], "_")[0]
+				Name = strings.Split(temp, "/")[1]
+			}
+		}
+		fmt.Println("containers toto")
+		fmt.Println(Name)
+		if err := agent.attachNetwork(containerID, Networks, MasterIP, Name); err != nil {
+			return err
+		}
+		var tnets []string
+		for net, domain := range Networks {
+			newnet := fmt.Sprintf("%s-%s", net, domain)
+			tnets = append(tnets, newnet)
+		}
+		fmt.Println(tnets)
+		networks[containerID] = tnets
 	}
 	if waitForRunning > 0 {
 		logger.Debugf("Wait %d seconds for container %s to start", waitForRunning, containerID)
@@ -427,7 +446,7 @@ func (agent *Agent) dockerPause(containerID string) error {
 	return nil
 }
 
-func (agent *Agent) dockerStop(containerID string, timeout time.Duration, Networks []string) error {
+func (agent *Agent) dockerStop(containerID string, timeout time.Duration, Networks map[string]string) error {
 	ctx := context.Background()
 	if len(Networks) > 0 {
 		if err := agent.detachNetwork(containerID, Networks); err != nil {
@@ -449,7 +468,25 @@ func (agent *Agent) dockerRestart(containerID string, timeout time.Duration) err
 	}
 	logger.Infof("Container %s restarted", containerID)
 	if len(networks[containerID]) > 0 {
-		if err := agent.attachNetwork(containerID, networks[containerID], ""); err != nil {
+		containers, err := agent.DockerClient.ContainerList(ctx, docker_types.ContainerListOptions{All: true})
+		if err != nil {
+			return err
+		}
+		Name := ""
+		for _, container := range containers {
+			if container.ID == containerID {
+				temp := strings.Split(container.Names[0], "_")[0]
+				Name = strings.Split(temp, "/")[1]
+			}
+		}
+		var nets map[string]string
+		nets = make(map[string]string)
+		for _, net := range networks[containerID] {
+			temp := strings.Split(net, "-")
+			nets[temp[0]] = temp[1]
+		}
+
+		if err := agent.attachNetwork(containerID, nets, "", Name); err != nil {
 			return err
 		}
 	}
@@ -1255,7 +1292,6 @@ func (agent *Agent) parseContainerEvent(msg docker_types_event.Message) error {
 	case "start":
 		agent.chSyncContainer <- containerID
 		agent.containerLogger(containerID, false)
-		//agent.networkCreate(containerID)
 	case "destroy":
 		agent.chDeregisterContainer <- containerID
 	default:
@@ -1340,7 +1376,6 @@ func (step *TaskStep) Docker() error {
 			return err
 		}
 		if err := agent.dockerStart(containerCreated.ID, createOpts.WaitForRunning, createOpts.Networks, createOpts.MasterIP); err != nil {
-
 			return err
 		}
 

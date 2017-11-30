@@ -9,10 +9,11 @@ import (
 )
 
 // detachNetwork describes available methods of the Network plugin
-func (agent *Agent) detachNetwork(containerID string, Networks []string) error {
+func (agent *Agent) detachNetwork(containerID string, Networks map[string]string) error {
 	ctx := context.Background()
 
-	for _, network := range Networks {
+	for network, domain := range Networks {
+		// nets
 		command := fmt.Sprintf("%s detach net:%s %s",
 			"/usr/local/bin/weave", string(network), containerID)
 		cmd2, err2 := parseCommandLine(command)
@@ -20,7 +21,18 @@ func (agent *Agent) detachNetwork(containerID string, Networks []string) error {
 			return fmt.Errorf("Error parsing command line (detach): %s", err2)
 		}
 		cmd := exec.CommandContext(ctx, cmd2[0], cmd2[1:]...)
-		cmd.Run()
+		IP, _ := cmd.Output()
+		//domains
+		if domain != "" {
+			command = fmt.Sprintf("%s dns-remove %s %s",
+				"/usr/local/bin/weave", string(IP), containerID)
+			cmd2, err2 = parseCommandLine(command)
+			if err2 != nil {
+				return fmt.Errorf("Error parsing command line (dns detach): %s", err2)
+			}
+			cmd = exec.CommandContext(ctx, cmd2[0], cmd2[1:]...)
+			cmd.Run()
+		}
 	}
 
 	return nil
@@ -110,15 +122,31 @@ func stringInSlice(a string, list []string) bool {
 }
 
 // getNewNets disconnect from old networks and prepare the new list of Nets
-func getNewNets(nets []string, containerID string) ([]string, error) {
-	var ret []string
-	var delete []string
-	diff := difference(nets, networks[containerID])
+func getNewNets(nets map[string]string, containerID string) (map[string]string, error) {
+	var ret map[string]string
+	var delete map[string]string
+	var tnets []string
+	var tnets2 []string
 
-	for i, net := range diff {
-		if stringInSlice(net, networks[containerID]) {
-			delete = append(delete, net)
-			ret = append(diff[:i], diff[i+1:]...)
+	ret = make(map[string]string)
+	delete = make(map[string]string)
+	for net, _ := range nets {
+		tnets = append(tnets, net)
+	}
+
+	fmt.Println(tnets)
+	fmt.Println(networks[containerID])
+	for _, network := range networks[containerID] {
+		tnets2 = append(tnets2, strings.Split(network, "-")[0])
+	}
+	diff := difference(tnets, tnets2)
+	fmt.Println(diff)
+
+	for _, net := range diff {
+		if stringInSlice(net, tnets2) {
+			delete[net] = nets[net]
+		} else {
+			ret[net] = nets[net]
 		}
 	}
 	if err := agent.detachNetwork(containerID, delete); err != nil {
@@ -128,8 +156,9 @@ func getNewNets(nets []string, containerID string) ([]string, error) {
 }
 
 // attachNetwork describes available methods of the Network plugin
-func (agent *Agent) attachNetwork(containerID string, Networks []string, MasterIP string) error {
+func (agent *Agent) attachNetwork(containerID string, Networks map[string]string, MasterIP string, Name string) error {
 	ctx := context.Background()
+	fmt.Println(Networks)
 
 	test := agent.checkSuperNetwork(MasterIP)
 	if test == nil {
@@ -144,17 +173,35 @@ func (agent *Agent) attachNetwork(containerID string, Networks []string, MasterI
 		if len(newNets) == 0 {
 			newNets = Networks
 		}
-		for _, network := range newNets {
+		fmt.Println(newNets)
+		for network, domain := range newNets {
+			//nets
 			command := fmt.Sprintf("%s attach net:%s %s",
 				"/usr/local/bin/weave", string(network), containerID)
 			cmd2, err2 := parseCommandLine(command)
 			if err2 != nil {
-				return fmt.Errorf("Error creating Network: %s", err2)
+				return fmt.Errorf("Error parsing command line (attach): %s", err2)
 			}
 			cmd := exec.CommandContext(ctx, cmd2[0], cmd2[1:]...)
-			err := cmd.Run()
+			IP, err := cmd.Output()
 			if err != nil {
 				return fmt.Errorf("Error attaching container to network: %s", err)
+			}
+			fmt.Println("IP")
+			fmt.Println(string(IP))
+			// domains
+			if domain != "" {
+				command = fmt.Sprintf("%s dns-add %s %s -h %s.%s",
+					"/usr/local/bin/weave", string(IP), containerID, Name, domain)
+				cmd2, err2 = parseCommandLine(command)
+				if err2 != nil {
+					return fmt.Errorf("Error parsing command line (dns add): %s", err2)
+				}
+				cmd = exec.CommandContext(ctx, cmd2[0], cmd2[1:]...)
+				err = cmd.Run()
+				if err != nil {
+					return fmt.Errorf("Error creating dns entry: %s", err)
+				}
 			}
 		}
 	}
