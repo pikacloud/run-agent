@@ -187,8 +187,6 @@ func (agent *Agent) attachNetwork(containerID string, Networks map[string]string
 			if err != nil {
 				return fmt.Errorf("Error attaching container to network: %s", err)
 			}
-			fmt.Println("IP")
-			fmt.Println(string(IP))
 			// domains
 			if domain != "" {
 				command = fmt.Sprintf("%s dns-add %s %s -h %s.%s",
@@ -202,6 +200,26 @@ func (agent *Agent) attachNetwork(containerID string, Networks map[string]string
 				if err != nil {
 					return fmt.Errorf("Error creating dns entry: %s", err)
 				}
+				//command = "/usr/local/bin/weave report | grep ':53' | cut -d: -f2 | cut -c 3-20"
+				//cmd = exec.CommandContext(ctx, "sh", "-c", command)
+				//IP, err = cmd.Output()
+				//if err != nil {
+				//	return fmt.Errorf("Error getting dns server: %s", err)
+				//}
+				//temp := fmt.Sprintf("search pikacloud.local\nnameserver %s\nnameserver 8.8.8.8", string(IP))
+				//	tmppath := fmt.Sprintf("/tmp/resolv.conf.%s", string(containerID))
+				//d1 := []byte(temp)
+				//err = ioutil.WriteFile(tmppath, d1, 0644)
+				//if err != nil {
+				//return fmt.Errorf("Error cannot write new resol.conf: %s", err)
+				//}
+				//command = fmt.Sprintf("docker cp %s %s:/etc/resolv.conf", tmppath, containerID)
+				//cmd = exec.CommandContext(ctx, "sh", "-c", command)
+				//err = cmd.Run()
+				//if err != nil {
+				//return fmt.Errorf("Error changing resolv.conf: %s", err)
+				//}
+				//os.Remove(tmppath)
 			}
 		}
 	}

@@ -341,6 +341,8 @@ func (agent *Agent) dockerCreate(opts *DockerCreateOpts) (*docker_types_containe
 		config.Cmd = s
 	}
 	natPortmap := docker_nat.PortMap{}
+	DNS := []string{"172.17.0.1", "8.8.8.8"}
+	DNSSearch := []string{"pikacloud.local"}
 	for _, p := range opts.Ports {
 		containerPortProto := docker_nat.Port(fmt.Sprintf("%d/%s", p.ContainerPort, p.Protocol))
 		dockerHostConfig := docker_nat.PortBinding{
@@ -353,6 +355,8 @@ func (agent *Agent) dockerCreate(opts *DockerCreateOpts) (*docker_types_containe
 		Binds:           opts.Binds,
 		PublishAllPorts: opts.PublishAll,
 		PortBindings:    natPortmap,
+		DNS:             DNS,
+		DNSSearch:       DNSSearch,
 	}
 	networkingConfig := &docker_types_network.NetworkingConfig{}
 	container, err := agent.DockerClient.ContainerCreate(ctx, config, hostConfig, networkingConfig, opts.Name)
