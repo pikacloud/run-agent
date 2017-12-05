@@ -38,7 +38,7 @@ func (agent *Agent) detachNetwork(containerID string, Networks map[string]string
 	return nil
 }
 
-func (agent *Agent) checkSuperNetwork(MasterIP string) error {
+func (agent *Agent) checkSuperNetwork(MasterIP string, NetPasswd string) error {
 	ctx := context.Background()
 	command, err := parseCommandLine("/bin/ps aux")
 	if err != nil {
@@ -53,7 +53,7 @@ func (agent *Agent) checkSuperNetwork(MasterIP string) error {
 
 	if process != true {
 		command2 := fmt.Sprintf("%s launch --password=%s --ipalloc-range %s --dns-domain=%s %s",
-			"/usr/local/bin/weave", "e29f169168f64368a32920e3ce041826", "10.42.0.0/16", "pikacloud.local", "--plugin=false --proxy=false --dns-ttl=10")
+			"/usr/local/bin/weave", NetPasswd, "10.42.0.0/16", "pikacloud.local", "--plugin=false --proxy=false")
 		command, err = parseCommandLine(command2)
 		if err != nil {
 			return fmt.Errorf("Error parsing command line (create): %s", err)
@@ -156,11 +156,10 @@ func getNewNets(nets map[string]string, containerID string) (map[string]string, 
 }
 
 // attachNetwork describes available methods of the Network plugin
-func (agent *Agent) attachNetwork(containerID string, Networks map[string]string, MasterIP string, Name string) error {
+func (agent *Agent) attachNetwork(containerID string, Networks map[string]string, MasterIP string, Name string, NetPasswd string) error {
 	ctx := context.Background()
-	fmt.Println(Networks)
 
-	test := agent.checkSuperNetwork(MasterIP)
+	test := agent.checkSuperNetwork(MasterIP, NetPasswd)
 	if test == nil {
 		newNets := Networks
 		if _, ok := networks[containerID]; ok {

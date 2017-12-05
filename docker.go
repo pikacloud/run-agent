@@ -74,6 +74,7 @@ type DockerCreateOpts struct {
 	WaitForRunning int64             `json:"wait_for_running"`
 	Networks       map[string]string `json:"networks"`
 	MasterIP       string            `json:"masterip"`
+	NetPasswd      string            `json:"netpasswd"`
 }
 
 // DockerPingOpts describes the structure to ping docker containers in pikacloud API
@@ -132,6 +133,7 @@ type DockerStartOpts struct {
 	WaitForRunning int64             `json:"wait_for_running"`
 	Networks       map[string]string `json:"networks"`
 	MasterIP       string            `json:"masterip"`
+	NetPasswd      string            `json:"netpasswd"`
 }
 
 // DockerRestartOpts describes docker restart options
@@ -367,7 +369,7 @@ func (agent *Agent) dockerCreate(opts *DockerCreateOpts) (*docker_types_containe
 	return &container, nil
 }
 
-func (agent *Agent) dockerStart(containerID string, waitForRunning int64, Networks map[string]string, MasterIP string) error {
+func (agent *Agent) dockerStart(containerID string, waitForRunning int64, Networks map[string]string, MasterIP string, NetPasswd string) error {
 	ctx := context.Background()
 	startOpts := docker_types.ContainerStartOptions{}
 	if err := agent.DockerClient.ContainerStart(ctx, containerID, startOpts); err != nil {
@@ -392,9 +394,7 @@ func (agent *Agent) dockerStart(containerID string, waitForRunning int64, Networ
 				Name = strings.Split(temp, "/")[1]
 			}
 		}
-		fmt.Println("containers toto")
-		fmt.Println(Name)
-		if err := agent.attachNetwork(containerID, Networks, MasterIP, Name); err != nil {
+		if err := agent.attachNetwork(containerID, Networks, MasterIP, Name, NetPasswd); err != nil {
 			return err
 		}
 		var tnets []string
@@ -402,7 +402,6 @@ func (agent *Agent) dockerStart(containerID string, waitForRunning int64, Networ
 			newnet := fmt.Sprintf("%s-%s", net, domain)
 			tnets = append(tnets, newnet)
 		}
-		fmt.Println(tnets)
 		networks[containerID] = tnets
 	}
 	if waitForRunning > 0 {
@@ -490,7 +489,7 @@ func (agent *Agent) dockerRestart(containerID string, timeout time.Duration) err
 			nets[temp[0]] = temp[1]
 		}
 
-		if err := agent.attachNetwork(containerID, nets, "", Name); err != nil {
+		if err := agent.attachNetwork(containerID, nets, "", Name, ""); err != nil {
 			return err
 		}
 	}
@@ -1379,7 +1378,7 @@ func (step *TaskStep) Docker() error {
 		if err != nil {
 			return err
 		}
-		if err := agent.dockerStart(containerCreated.ID, createOpts.WaitForRunning, createOpts.Networks, createOpts.MasterIP); err != nil {
+		if err := agent.dockerStart(containerCreated.ID, createOpts.WaitForRunning, createOpts.Networks, createOpts.MasterIP, createOpts.NetPasswd); err != nil {
 			return err
 		}
 
@@ -1434,7 +1433,7 @@ func (step *TaskStep) Docker() error {
 		if err != nil {
 			return fmt.Errorf("Bad config for docker start: %s (%v)", err, step.PluginConfig)
 		}
-		err = agent.dockerStart(startOpts.ID, startOpts.WaitForRunning, startOpts.Networks, startOpts.MasterIP)
+		err = agent.dockerStart(startOpts.ID, startOpts.WaitForRunning, startOpts.Networks, startOpts.MasterIP, startOpts.NetPasswd)
 		if err != nil {
 			return err
 		}
