@@ -105,7 +105,7 @@
 
 [[projects]]
   name = "github.com/moby/moby"
-  packages = ["builder","builder/dockerignore","client","pkg/archive","pkg/fileutils","pkg/jsonmessage","pkg/stdcopy"]
+  packages = ["builder","builder/dockerignore","client","pkg/archive","pkg/fileutils","pkg/jsonmessage","pkg/stdcopy","pkg/stringid"]
   revision = "eef6495eddab52828327aade186443681ed71a4e"
   version = "v17.03.2-ce-rc1"
 
@@ -213,6 +213,6 @@
 [solve-meta]
   analyzer-name = "dep"
   analyzer-version = 1
-  inputs-digest = "3488209b096a116675adce57662df338eb5e85e20fb1a3fa3165a7b097f08643"
+  inputs-digest = "7e1978d3c4d6a89324c780de9832d1476ac1c270bc4c89674791b3a3ee91e0f8"
   solver-name = "gps-cdcl"
   solver-version = 1

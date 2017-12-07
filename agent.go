@@ -7,6 +7,8 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
+	"io/ioutil"
+	"net/http"
 	"runtime"
 	"strings"
 	"time"
@@ -25,6 +27,7 @@ type CreateAgentOptions struct {
 	Version   string   `json:"version"`
 	OS        string   `json:"os"`
 	Arch      string   `json:"arch"`
+	IP        string   `json:"ip"`
 }
 
 // PingAgentOptions represents the agent Ping() options
@@ -85,12 +88,22 @@ func NewAgent(apiToken string, hostname string, labels []string) *Agent {
 
 // Register an agent
 func (agent *Agent) Register() error {
+	req, err := http.Get("https://api.ipify.org")
+	if err != nil {
+		return err
+	}
+	defer req.Body.Close()
+	ip, err2 := ioutil.ReadAll(req.Body)
+	if err2 != nil {
+		return err2
+	}
 	opt := CreateAgentOptions{
 		Hostname:  agent.Hostname,
 		Localtime: localtime(),
 		Version:   version,
 		OS:        runtime.GOOS,
 		Arch:      runtime.GOARCH,
+		IP:        strings.TrimSpace(string(ip)),
 	}
 	if len(agent.Labels) > 0 {
 		opt.Labels = agent.Labels

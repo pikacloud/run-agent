@@ -72,6 +72,9 @@ type DockerCreateOpts struct {
 	Labels         map[string]string `json:"labels"`
 	PullOpts       *DockerPullOpts   `json:"pull_opts"`
 	WaitForRunning int64             `json:"wait_for_running"`
+	Networks       map[string]string `json:"networks"`
+	MasterIP       string            `json:"masterip"`
+	NetPasswd      string            `json:"netpasswd"`
 }
 
 // DockerPingOpts describes the structure to ping docker containers in pikacloud API
@@ -120,13 +123,17 @@ type DockerPauseOpts struct {
 
 // DockerStopOpts describes docker stop options
 type DockerStopOpts struct {
-	ID string `json:"id"`
+	ID       string            `json:"id"`
+	Networks map[string]string `json:"networks"`
 }
 
 // DockerStartOpts describes docker start options
 type DockerStartOpts struct {
-	ID             string `json:"id"`
-	WaitForRunning int64  `json:"wait_for_running"`
+	ID             string            `json:"id"`
+	WaitForRunning int64             `json:"wait_for_running"`
+	Networks       map[string]string `json:"networks"`
+	MasterIP       string            `json:"masterip"`
+	NetPasswd      string            `json:"netpasswd"`
 }
 
 // DockerRestartOpts describes docker restart options
@@ -186,6 +193,7 @@ type AgentContainer struct {
 	Container                string                    `json:"container"`
 	Config                   string                    `json:"config"`
 	AgentContainerStartRetry *AgentContainerStartRetry `json:"start_retry"`
+	Networks                 []string                  `json:"networks"`
 }
 
 type syncDockerContainersOptions struct {
@@ -239,10 +247,18 @@ func (agent *Agent) trackedContainer(containerID string) (*AgentContainer, error
 		return nil, fmt.Errorf("Cannot decode %v", inspect)
 	}
 
+	var nets []string
+	if networks[c.ID] == nil {
+		nets = make([]string, 0)
+	} else {
+		nets = networks[c.ID]
+	}
+
 	ac := &AgentContainer{
 		ID:        c.ID,
 		Container: string(data),
 		Config:    string(inspectConfig),
+		Networks:  nets,
 	}
 	lock.Lock()
 	if trackedContainers[containerID] == nil {
@@ -264,11 +280,17 @@ func (agent *Agent) initTrackedContainers() error {
 	if err != nil {
 		return err
 	}
+	//var toto = 1
 	for _, container := range containers {
 		trackedContainer, err := agent.trackedContainer(container.ID)
 		if err != nil {
 			logger.Fatal(err)
 		}
+		//if toto == 1 {
+		//	echo, _ := json.MarshalIndent(trackedContainer, "", "    ")
+		//	fmt.Println(string(echo))
+		//	toto = 0
+		//}
 		lock.Lock()
 		trackedContainers[container.ID] = trackedContainer
 		lock.Unlock()
@@ -321,6 +343,8 @@ func (agent *Agent) dockerCreate(opts *DockerCreateOpts) (*docker_types_containe
 		config.Cmd = s
 	}
 	natPortmap := docker_nat.PortMap{}
+	DNS := []string{"172.17.0.1", "8.8.8.8"}
+	DNSSearch := []string{"pikacloud.local"}
 	for _, p := range opts.Ports {
 		containerPortProto := docker_nat.Port(fmt.Sprintf("%d/%s", p.ContainerPort, p.Protocol))
 		dockerHostConfig := docker_nat.PortBinding{
@@ -333,6 +357,8 @@ func (agent *Agent) dockerCreate(opts *DockerCreateOpts) (*docker_types_containe
 		Binds:           opts.Binds,
 		PublishAllPorts: opts.PublishAll,
 		PortBindings:    natPortmap,
+		DNS:             DNS,
+		DNSSearch:       DNSSearch,
 	}
 	networkingConfig := &docker_types_network.NetworkingConfig{}
 	container, err := agent.DockerClient.ContainerCreate(ctx, config, hostConfig, networkingConfig, opts.Name)
@@ -343,7 +369,7 @@ func (agent *Agent) dockerCreate(opts *DockerCreateOpts) (*docker_types_containe
 	return &container, nil
 }
 
-func (agent *Agent) dockerStart(containerID string, waitForRunning int64) error {
+func (agent *Agent) dockerStart(containerID string, waitForRunning int64, Networks map[string]string, MasterIP string, NetPasswd string) error {
 	ctx := context.Background()
 	startOpts := docker_types.ContainerStartOptions{}
 	if err := agent.DockerClient.ContainerStart(ctx, containerID, startOpts); err != nil {
@@ -356,6 +382,28 @@ func (agent *Agent) dockerStart(containerID string, waitForRunning int64) error 
 		return err
 	}
 	logger.Infof("New container started %s", containerID)
+	if len(Networks) > 0 {
+		containers, err := agent.DockerClient.ContainerList(ctx, docker_types.ContainerListOptions{All: true})
+		if err != nil {
+			return err
+		}
+		Name := ""
+		for _, container := range containers {
+			if container.ID == containerID {
+				temp := strings.Split(container.Names[0], "_")[0]
+				Name = strings.Split(temp, "/")[1]
+			}
+		}
+		if err := agent.attachNetwork(containerID, Networks, MasterIP, Name, NetPasswd); err != nil {
+			return err
+		}
+		var tnets []string
+		for net, domain := range Networks {
+			newnet := fmt.Sprintf("%s-%s", net, domain)
+			tnets = append(tnets, newnet)
+		}
+		networks[containerID] = tnets
+	}
 	if waitForRunning > 0 {
 		logger.Debugf("Wait %d seconds for container %s to start", waitForRunning, containerID)
 		time.Sleep(time.Duration(waitForRunning) * time.Second)
@@ -401,8 +449,14 @@ func (agent *Agent) dockerPause(containerID string) error {
 	return nil
 }
 
-func (agent *Agent) dockerStop(containerID string, timeout time.Duration) error {
+func (agent *Agent) dockerStop(containerID string, timeout time.Duration, Networks map[string]string) error {
 	ctx := context.Background()
+	if len(Networks) > 0 {
+		if err := agent.detachNetwork(containerID, Networks); err != nil {
+			return err
+		}
+		networks[containerID] = []string{""}
+	}
 	if err := agent.DockerClient.ContainerStop(ctx, containerID, &timeout); err != nil {
 		return err
 	}
@@ -416,6 +470,29 @@ func (agent *Agent) dockerRestart(containerID string, timeout time.Duration) err
 		return err
 	}
 	logger.Infof("Container %s restarted", containerID)
+	if len(networks[containerID]) > 0 {
+		containers, err := agent.DockerClient.ContainerList(ctx, docker_types.ContainerListOptions{All: true})
+		if err != nil {
+			return err
+		}
+		Name := ""
+		for _, container := range containers {
+			if container.ID == containerID {
+				temp := strings.Split(container.Names[0], "_")[0]
+				Name = strings.Split(temp, "/")[1]
+			}
+		}
+		var nets map[string]string
+		nets = make(map[string]string)
+		for _, net := range networks[containerID] {
+			temp := strings.Split(net, "-")
+			nets[temp[0]] = temp[1]
+		}
+
+		if err := agent.attachNetwork(containerID, nets, "", Name, ""); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -981,6 +1058,7 @@ func (agent *Agent) infiniteSyncDockerInfo() {
 		if !reflect.DeepEqual(dockerInfoState, info) {
 			err := agent.syncDockerInfo(info)
 			if err != nil {
+				fmt.Println("infiniteSyncDockerInfo")
 				logger.Infof("Cannot sync docker info: %+v", err)
 			} else {
 				dockerInfoState = info
@@ -1051,6 +1129,7 @@ func (agent *Agent) trackedDockerContainersSyncer() {
 			trackedContainers[containerID] = trackedContainer
 			errSync := agent.syncDockerContainers([]*AgentContainer{trackedContainer})
 			if errSync != nil {
+				fmt.Println(trackedContainer)
 				logger.Errorf("Cannot sync container %s: %+v", containerID, errSync)
 				agent.forceSyncTrackedDockerContainers()
 				continue
@@ -1299,8 +1378,7 @@ func (step *TaskStep) Docker() error {
 		if err != nil {
 			return err
 		}
-		if err := agent.dockerStart(containerCreated.ID, createOpts.WaitForRunning); err != nil {
-
+		if err := agent.dockerStart(containerCreated.ID, createOpts.WaitForRunning, createOpts.Networks, createOpts.MasterIP, createOpts.NetPasswd); err != nil {
 			return err
 		}
 
@@ -1355,7 +1433,7 @@ func (step *TaskStep) Docker() error {
 		if err != nil {
 			return fmt.Errorf("Bad config for docker start: %s (%v)", err, step.PluginConfig)
 		}
-		err = agent.dockerStart(startOpts.ID, startOpts.WaitForRunning)
+		err = agent.dockerStart(startOpts.ID, startOpts.WaitForRunning, startOpts.Networks, startOpts.MasterIP, startOpts.NetPasswd)
 		if err != nil {
 			return err
 		}
@@ -1366,7 +1444,7 @@ func (step *TaskStep) Docker() error {
 		if err != nil {
 			return fmt.Errorf("Bad config for docker unpause: %s (%v)", err, step.PluginConfig)
 		}
-		err = agent.dockerStop(stopOpts.ID, 10*time.Second)
+		err = agent.dockerStop(stopOpts.ID, 10*time.Second, stopOpts.Networks)
 		if err != nil {
 			return err
 		}
