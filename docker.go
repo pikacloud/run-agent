@@ -280,17 +280,11 @@ func (agent *Agent) initTrackedContainers() error {
 	if err != nil {
 		return err
 	}
-	//var toto = 1
 	for _, container := range containers {
 		trackedContainer, err := agent.trackedContainer(container.ID)
 		if err != nil {
 			logger.Fatal(err)
 		}
-		//if toto == 1 {
-		//	echo, _ := json.MarshalIndent(trackedContainer, "", "    ")
-		//	fmt.Println(string(echo))
-		//	toto = 0
-		//}
 		lock.Lock()
 		trackedContainers[container.ID] = trackedContainer
 		lock.Unlock()
@@ -1058,7 +1052,6 @@ func (agent *Agent) infiniteSyncDockerInfo() {
 		if !reflect.DeepEqual(dockerInfoState, info) {
 			err := agent.syncDockerInfo(info)
 			if err != nil {
-				fmt.Println("infiniteSyncDockerInfo")
 				logger.Infof("Cannot sync docker info: %+v", err)
 			} else {
 				dockerInfoState = info
@@ -1129,7 +1122,6 @@ func (agent *Agent) trackedDockerContainersSyncer() {
 			trackedContainers[containerID] = trackedContainer
 			errSync := agent.syncDockerContainers([]*AgentContainer{trackedContainer})
 			if errSync != nil {
-				fmt.Println(trackedContainer)
 				logger.Errorf("Cannot sync container %s: %+v", containerID, errSync)
 				agent.forceSyncTrackedDockerContainers()
 				continue
