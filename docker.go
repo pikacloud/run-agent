@@ -73,7 +73,7 @@ type DockerCreateOpts struct {
 	PullOpts       *DockerPullOpts   `json:"pull_opts"`
 	WaitForRunning int64             `json:"wait_for_running"`
 	Networks       map[string]string `json:"networks"`
-	MasterIP       string            `json:"masterip"`
+	MasterIP       []string          `json:"masterip"`
 	NetPasswd      string            `json:"netpasswd"`
 }
 
@@ -132,7 +132,7 @@ type DockerStartOpts struct {
 	ID             string            `json:"id"`
 	WaitForRunning int64             `json:"wait_for_running"`
 	Networks       map[string]string `json:"networks"`
-	MasterIP       string            `json:"masterip"`
+	MasterIP       []string          `json:"masterip"`
 	NetPasswd      string            `json:"netpasswd"`
 }
 
@@ -363,7 +363,7 @@ func (agent *Agent) dockerCreate(opts *DockerCreateOpts) (*docker_types_containe
 	return &container, nil
 }
 
-func (agent *Agent) dockerStart(containerID string, waitForRunning int64, Networks map[string]string, MasterIP string, NetPasswd string) error {
+func (agent *Agent) dockerStart(containerID string, waitForRunning int64, Networks map[string]string, MasterIP []string, NetPasswd string) error {
 	ctx := context.Background()
 	startOpts := docker_types.ContainerStartOptions{}
 	if err := agent.DockerClient.ContainerStart(ctx, containerID, startOpts); err != nil {
@@ -483,7 +483,8 @@ func (agent *Agent) dockerRestart(containerID string, timeout time.Duration) err
 			nets[temp[0]] = temp[1]
 		}
 
-		if err := agent.attachNetwork(containerID, nets, "", Name, ""); err != nil {
+		var mi []string
+		if err := agent.attachNetwork(containerID, nets, mi, Name, ""); err != nil {
 			return err
 		}
 	}

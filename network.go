@@ -2,10 +2,14 @@ package main
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"os/exec"
 	"strings"
+	"time"
+
+	fernet "github.com/fernet/fernet-go"
 )
 
 // detachNetwork describes available methods of the Network plugin
@@ -38,7 +42,7 @@ func (agent *Agent) detachNetwork(containerID string, Networks map[string]string
 	return nil
 }
 
-func (agent *Agent) checkSuperNetwork(MasterIP string, NetPasswd string) error {
+func (agent *Agent) checkSuperNetwork(MasterIP []string) error {
 	ctx := context.Background()
 	command, err := parseCommandLine("/bin/ps aux")
 	if err != nil {
@@ -52,8 +56,15 @@ func (agent *Agent) checkSuperNetwork(MasterIP string, NetPasswd string) error {
 	process := strings.Contains(test, "weave")
 
 	if process != true {
+		sn, err3 := pikacloudClient.SuperNet(agent.ID)
+		if err3 != nil {
+			return err3
+		}
+		key := base64.StdEncoding.EncodeToString([]byte(agent.ID))
+		k := fernet.MustDecodeKeys(key)
+		password := fernet.VerifyAndDecrypt([]byte(sn.Key), 60*time.Second, k)
 		command2 := fmt.Sprintf("%s launch --password=%s --ipalloc-range %s --dns-domain=%s %s",
-			"/usr/local/bin/weave", NetPasswd, "10.42.0.0/16", "pikacloud.local", "--plugin=false --proxy=false")
+			"/usr/local/bin/weave", string(password), "10.42.0.0/16", "pikacloud.local", "--plugin=false --proxy=false")
 		command, err = parseCommandLine(command2)
 		if err != nil {
 			return fmt.Errorf("Error parsing command line (create): %s", err)
@@ -156,10 +167,10 @@ func getNewNets(nets map[string]string, containerID string) (map[string]string, 
 }
 
 // attachNetwork describes available methods of the Network plugin
-func (agent *Agent) attachNetwork(containerID string, Networks map[string]string, MasterIP string, Name string, NetPasswd string) error {
+func (agent *Agent) attachNetwork(containerID string, Networks map[string]string, MasterIP []string, Name string, NetPasswd string) error {
 	ctx := context.Background()
 
-	test := agent.checkSuperNetwork(MasterIP, NetPasswd)
+	test := agent.checkSuperNetwork(MasterIP)
 	if test == nil {
 		newNets := Networks
 		if _, ok := networks[containerID]; ok {

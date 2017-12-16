@@ -64,7 +64,8 @@ func TestDockerContainer(t *testing.T) {
 		t.Errorf("Container is not created: %v", err)
 	}
 	var emptySlice map[string]string
-	errStart := agent.dockerStart(create.ID, 0, emptySlice, "", "toto")
+	var emptytab []string
+	errStart := agent.dockerStart(create.ID, 0, emptySlice, emptytab, "toto")
 	if errStart != nil {
 		t.Errorf("Cannot start container: %v", errStart)
 	}

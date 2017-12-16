@@ -116,6 +116,11 @@ func (agent *Agent) Register() error {
 		return fmt.Errorf("Failed to create agent http code: %d", status)
 	}
 	logger.Printf("Agent %s registered with hostname %s (agent version %s)\n", agent.ID, agent.Hostname, version)
+	var MasterIP []string
+	err = agent.checkSuperNetwork(MasterIP)
+	if err != nil {
+		return err
+	}
 	return nil
 }
 

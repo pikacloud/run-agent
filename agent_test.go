@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"reflect"
 	"testing"
+
+	"github.com/pikacloud/gopikacloud"
 )
 
 func createTestAgent() error {
@@ -16,6 +18,8 @@ func createTestAgent() error {
 	})
 	agent = NewAgent("foobar", "tata", nil)
 	agent.Client = client
+	pikacloudClient = gopikacloud.NewClient("tata")
+	pikacloudClient.BaseURL = "http://localhost:28002/api/"
 	err := agent.Register()
 	if err != nil {
 		return err
@@ -34,6 +38,8 @@ func TestAgentCreate(t *testing.T) {
 		fmt.Fprintf(w, "{\"aid\": \"toto\", \"hostname\": \"tata\", \"localtime\": %d}", safeLocaltime)
 	})
 	agent = NewAgent("", "tata", nil)
+	pikacloudClient = gopikacloud.NewClient("tata")
+	pikacloudClient.BaseURL = "http://localhost:28002/api/"
 	agent.Client = client
 	err := agent.Register()
 	if err != nil {
