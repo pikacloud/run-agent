@@ -30,6 +30,7 @@ var (
 	runningTasksList  map[string]*Task
 	metrics           *Metrics
 	networks          map[string][]string
+	interfaces        []string
 	cpuprofile        = flag.String("cpuprofile", "", "write cpu profile to file")
 	showVersion       = flag.Bool("version", false, "show version")
 	showLatestVersion = flag.Bool("latest", false, "show latest version available")
@@ -178,6 +179,11 @@ func main() {
 		if errUpdate != nil {
 			logger.Fatalf("Unable to auto-update agent: %s", errUpdate)
 		}
+	}
+
+	erro := agent.getNetInterfaces()
+	if erro != nil {
+		logger.Fatalf("Unable to get Agent net interfaces: %s", erro.Error())
 	}
 
 	err := agent.Register()

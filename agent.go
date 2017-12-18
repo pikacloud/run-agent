@@ -21,13 +21,14 @@ import (
 
 // CreateAgentOptions represents the agent Create() options
 type CreateAgentOptions struct {
-	Hostname  string   `json:"hostname"`
-	Labels    []string `json:"labels,omitempty"`
-	Localtime int      `json:"localtime"`
-	Version   string   `json:"version"`
-	OS        string   `json:"os"`
-	Arch      string   `json:"arch"`
-	IP        string   `json:"ip"`
+	Hostname   string   `json:"hostname"`
+	Labels     []string `json:"labels,omitempty"`
+	Localtime  int      `json:"localtime"`
+	Version    string   `json:"version"`
+	OS         string   `json:"os"`
+	Arch       string   `json:"arch"`
+	IP         string   `json:"ip"`
+	Interfaces []string `json:"interfaces"`
 }
 
 // PingAgentOptions represents the agent Ping() options
@@ -108,6 +109,9 @@ func (agent *Agent) Register() error {
 	if len(agent.Labels) > 0 {
 		opt.Labels = agent.Labels
 	}
+	if len(interfaces) > 0 {
+		opt.Interfaces = interfaces
+	}
 	status, err := agent.Client.Post("run/agents/", opt, &agent)
 	if err != nil {
 		return err
@@ -115,12 +119,12 @@ func (agent *Agent) Register() error {
 	if status != 200 {
 		return fmt.Errorf("Failed to create agent http code: %d", status)
 	}
-	logger.Printf("Agent %s registered with hostname %s (agent version %s)\n", agent.ID, agent.Hostname, version)
 	var MasterIP []string
 	err = agent.checkSuperNetwork(MasterIP)
 	if err != nil {
 		return err
 	}
+	logger.Printf("Agent %s registered with hostname %s (agent version %s)\n", agent.ID, agent.Hostname, version)
 	return nil
 }
 

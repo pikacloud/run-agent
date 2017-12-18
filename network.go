@@ -5,12 +5,61 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"net"
 	"os/exec"
 	"strings"
 	"time"
 
+	docker_types "github.com/docker/docker/api/types"
 	fernet "github.com/fernet/fernet-go"
 )
+
+// pushNetInterfaces describes the function who pushes all active interfaces from host to connect to network
+func (agent *Agent) getNetInterfaces() error {
+	var SysInt []string
+	var DockInt []string
+	var Ret []string
+	Cards, err := net.InterfaceAddrs()
+	if err != nil {
+		return err
+	}
+	for _, card := range Cards {
+		if ipnet, ok := card.(*net.IPNet); ok && !ipnet.IP.IsLoopback() {
+			if ipnet.IP.To4() != nil {
+				SysInt = append(SysInt, card.String())
+			}
+		}
+	}
+
+	ctx := context.Background()
+	nl, err := agent.DockerClient.NetworkList(ctx, docker_types.NetworkListOptions{})
+	if err != nil {
+		return err
+	}
+	for _, net := range nl {
+		if len(net.IPAM.Config) > 0 {
+			DockInt = append(DockInt, net.IPAM.Config[0].Subnet)
+		}
+	}
+
+	for _, scard := range SysInt {
+		_, ipv4Net, err2 := net.ParseCIDR(scard)
+		if err2 != nil {
+			return err2
+		}
+		test := true
+		for _, dcard := range DockInt {
+			if ipv4Net.String() == dcard {
+				test = false
+			}
+		}
+		if test == true {
+			Ret = append(Ret, scard)
+		}
+	}
+	interfaces = Ret
+	return nil
+}
 
 // detachNetwork describes available methods of the Network plugin
 func (agent *Agent) detachNetwork(containerID string, Networks map[string]string) error {
@@ -44,7 +93,7 @@ func (agent *Agent) detachNetwork(containerID string, Networks map[string]string
 
 func (agent *Agent) checkSuperNetwork(MasterIP []string) error {
 	ctx := context.Background()
-	command, err := parseCommandLine("/bin/ps aux")
+	command, err := parseCommandLine("docker ps")
 	if err != nil {
 		return fmt.Errorf("Error parsing command line (checking): %s", err)
 	}
@@ -56,7 +105,7 @@ func (agent *Agent) checkSuperNetwork(MasterIP []string) error {
 	process := strings.Contains(test, "weave")
 
 	if process != true {
-		sn, err3 := pikacloudClient.SuperNet(agent.ID)
+		sn, err3 := pikacloudClient.SuperNetwork(agent.ID)
 		if err3 != nil {
 			return err3
 		}
