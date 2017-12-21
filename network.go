@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net"
 	"os/exec"
+	"reflect"
 	"strings"
 	"time"
 
@@ -14,14 +15,47 @@ import (
 	fernet "github.com/fernet/fernet-go"
 )
 
-// pushNetInterfaces describes the function who pushes all active interfaces from host to connect to network
-func (agent *Agent) getNetInterfaces() error {
+func (agent *Agent) infiniteSyncAgentInterfaces() {
+	for {
+		newInt, err := agent.getNetInterfaces()
+		if err != nil {
+			time.Sleep(3 * time.Second)
+			continue
+		}
+
+		if !reflect.DeepEqual(interfaces, newInt) {
+			interfaces = newInt
+			err := agent.syncAgentInterfaces()
+			if err != nil {
+				logger.Infof("Cannot sync agent interfaces: %+v", err)
+			} else {
+				logger.Debug("Sync agent interfaces OK")
+			}
+		}
+		time.Sleep(3 * time.Second)
+	}
+}
+
+func (agent *Agent) syncAgentInterfaces() error {
+	opt := CreateAgentOptions{
+		Interfaces: interfaces,
+	}
+	uri := fmt.Sprintf("run/agents/%s/", agent.ID)
+	_, err := pikacloudClient.Put(uri, opt, &agent)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+// getNetInterfaces describes the function who pushes all active interfaces from host to connect to network
+func (agent *Agent) getNetInterfaces() ([]string, error) {
 	var SysInt []string
 	var DockInt []string
 	var Ret []string
 	Cards, err := net.InterfaceAddrs()
 	if err != nil {
-		return err
+		return Ret, err
 	}
 	for _, card := range Cards {
 		if ipnet, ok := card.(*net.IPNet); ok && !ipnet.IP.IsLoopback() {
@@ -34,18 +68,17 @@ func (agent *Agent) getNetInterfaces() error {
 	ctx := context.Background()
 	nl, err := agent.DockerClient.NetworkList(ctx, docker_types.NetworkListOptions{})
 	if err != nil {
-		return err
+		return Ret, err
 	}
 	for _, net := range nl {
 		if len(net.IPAM.Config) > 0 {
 			DockInt = append(DockInt, net.IPAM.Config[0].Subnet)
 		}
 	}
-
 	for _, scard := range SysInt {
 		_, ipv4Net, err2 := net.ParseCIDR(scard)
 		if err2 != nil {
-			return err2
+			return Ret, err2
 		}
 		test := true
 		for _, dcard := range DockInt {
@@ -57,8 +90,7 @@ func (agent *Agent) getNetInterfaces() error {
 			Ret = append(Ret, scard)
 		}
 	}
-	interfaces = Ret
-	return nil
+	return Ret, nil
 }
 
 // detachNetwork describes available methods of the Network plugin
@@ -194,8 +226,6 @@ func getNewNets(nets map[string]string, containerID string) (map[string]string, 
 		tnets = append(tnets, net)
 	}
 
-	fmt.Println(tnets)
-	fmt.Println(networks[containerID])
 	for _, network := range networks[containerID] {
 		tnets2 = append(tnets2, strings.Split(network, "-")[0])
 	}
@@ -259,26 +289,6 @@ func (agent *Agent) attachNetwork(containerID string, Networks map[string]string
 				if err != nil {
 					return fmt.Errorf("Error creating dns entry: %s", err)
 				}
-				//command = "/usr/local/bin/weave report | grep ':53' | cut -d: -f2 | cut -c 3-20"
-				//cmd = exec.CommandContext(ctx, "sh", "-c", command)
-				//IP, err = cmd.Output()
-				//if err != nil {
-				//	return fmt.Errorf("Error getting dns server: %s", err)
-				//}
-				//temp := fmt.Sprintf("search pikacloud.local\nnameserver %s\nnameserver 8.8.8.8", string(IP))
-				//	tmppath := fmt.Sprintf("/tmp/resolv.conf.%s", string(containerID))
-				//d1 := []byte(temp)
-				//err = ioutil.WriteFile(tmppath, d1, 0644)
-				//if err != nil {
-				//return fmt.Errorf("Error cannot write new resol.conf: %s", err)
-				//}
-				//command = fmt.Sprintf("docker cp %s %s:/etc/resolv.conf", tmppath, containerID)
-				//cmd = exec.CommandContext(ctx, "sh", "-c", command)
-				//err = cmd.Run()
-				//if err != nil {
-				//return fmt.Errorf("Error changing resolv.conf: %s", err)
-				//}
-				//os.Remove(tmppath)
 			}
 		}
 	}

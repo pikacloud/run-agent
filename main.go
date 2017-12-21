@@ -181,7 +181,8 @@ func main() {
 		}
 	}
 
-	erro := agent.getNetInterfaces()
+	var erro error
+	interfaces, erro = agent.getNetInterfaces()
 	if erro != nil {
 		logger.Fatalf("Unable to get Agent net interfaces: %s", erro.Error())
 	}
@@ -219,6 +220,8 @@ func main() {
 	}
 	wg.Add(1)
 	go agent.infiniteSyncDockerInfo()
+	wg.Add(1)
+	go agent.infiniteSyncAgentInterfaces()
 	wg.Add(1)
 	go agent.infinitePing()
 	wg.Add(1)
