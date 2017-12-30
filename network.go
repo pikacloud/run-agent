@@ -292,39 +292,7 @@ func IsPublicIP(IP net.IP) bool {
 	return false
 }
 
-func getAvailableNetworksToConnect(connectOpts map[string][]string) (map[string][]string, error) {
-	ret := make(map[string][]string)
-	/*for aid, extifaces := range connectOpts {
-
-	tabOpts := strings.Split(extifaces, ",")
-	for _, iface := range interfaces {
-		_, agentIpv4Net, err := net.ParseCIDR(iface)
-		if err != nil {
-			return nil, fmt.Errorf("Error validating CIDR Agent: %s", err)
-		}
-		for _, extiface := range tabOpts {
-			extAgentIpv4, extAgentIpv4Net, err2 := net.ParseCIDR(extiface)
-			if err2 != nil {
-				return nil, fmt.Errorf("Error validating CIDR External Agent: %s", err2)
-			}
-			if agentIpv4Net == extAgentIpv4Net {
-				IP := strings.Split(extiface, "/")
-				ret = append(ret, IP[0])
-			} else if IsPublicIP(extAgentIpv4) {
-				ret = append(ret, string(extAgentIpv4))
-			}
-		}
-	}
-	}*/
-	return ret, nil
-}
-
 func (agent *Agent) ConnectNetPeer(connectOpts map[string][]string) error {
-	//newConnOpts, err := getAvailableNetworksToConnect(connectOpts)
-	//if err != nil {
-	//	return err
-	//}
-	//fmt.Println(newConnOpts)
 	ctx := context.Background()
 	for aid, ips := range connectOpts {
 		for _, net := range ips {
@@ -351,6 +319,7 @@ func (agent *Agent) ConnectNetPeer(connectOpts map[string][]string) error {
 			success := strings.Contains(string(output), ip[0])
 			if success {
 				peers[aid] = append(peers[aid], ip[0])
+				fmt.Println(peers)
 			}
 		}
 	}
