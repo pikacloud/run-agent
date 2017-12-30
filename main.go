@@ -45,6 +45,7 @@ var (
 	pikacloudClient   *gopikacloud.Client
 	logger            = logrus.New()
 	streamer          *Streamer
+	peers             map[string][]string
 )
 
 // PluginConfig describes a plugin option
@@ -112,6 +113,7 @@ func main() {
 	runningTasksList = make(map[string]*Task)
 	metrics = &Metrics{}
 	networks = make(map[string][]string)
+	peers = make(map[string][]string)
 	killchan := make(chan os.Signal, 2)
 	signal.Notify(killchan, syscall.SIGINT, syscall.SIGTERM)
 

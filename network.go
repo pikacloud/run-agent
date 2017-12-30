@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
@@ -155,30 +156,6 @@ func (agent *Agent) checkSuperNetwork(MasterIP []string) error {
 			return fmt.Errorf("Error creating Network: %s", err)
 		}
 	}
-
-	if len(MasterIP) > 0 {
-		command2 := "/usr/local/bin/weave status peers"
-		command, err = parseCommandLine(command2)
-		if err != nil {
-			return fmt.Errorf("Error parsing command line (check peers): %s", err)
-		}
-		output, err = exec.CommandContext(ctx, command[0], command[1:]...).Output()
-		if err != nil {
-			return fmt.Errorf("Error checking connect state: %s", err)
-		}
-		if strings.Count(string(output), "\n") <= 2 {
-			command2 = fmt.Sprintf("%s connect %s",
-				"/usr/local/bin/weave", MasterIP)
-			command, err = parseCommandLine(command2)
-			if err != nil {
-				return fmt.Errorf("Error parsing command line (connect): %s", err)
-			}
-			err = exec.CommandContext(ctx, command[0], command[1:]...).Run()
-			if err != nil {
-				return fmt.Errorf("Error connecting Peer: %s", err)
-			}
-		}
-	}
 	return nil
 }
 
@@ -294,6 +271,112 @@ func (agent *Agent) attachNetwork(containerID string, Networks map[string]string
 	}
 
 	return nil
+}
+
+func IsPublicIP(IP net.IP) bool {
+	if IP.IsLoopback() || IP.IsLinkLocalMulticast() || IP.IsLinkLocalUnicast() {
+		return false
+	}
+	if ip4 := IP.To4(); ip4 != nil {
+		switch true {
+		case ip4[0] == 10:
+			return false
+		case ip4[0] == 172 && ip4[1] >= 16 && ip4[1] <= 31:
+			return false
+		case ip4[0] == 192 && ip4[1] == 168:
+			return false
+		default:
+			return true
+		}
+	}
+	return false
+}
+
+func getAvailableNetworksToConnect(connectOpts map[string][]string) (map[string][]string, error) {
+	ret := make(map[string][]string)
+	/*for aid, extifaces := range connectOpts {
+
+	tabOpts := strings.Split(extifaces, ",")
+	for _, iface := range interfaces {
+		_, agentIpv4Net, err := net.ParseCIDR(iface)
+		if err != nil {
+			return nil, fmt.Errorf("Error validating CIDR Agent: %s", err)
+		}
+		for _, extiface := range tabOpts {
+			extAgentIpv4, extAgentIpv4Net, err2 := net.ParseCIDR(extiface)
+			if err2 != nil {
+				return nil, fmt.Errorf("Error validating CIDR External Agent: %s", err2)
+			}
+			if agentIpv4Net == extAgentIpv4Net {
+				IP := strings.Split(extiface, "/")
+				ret = append(ret, IP[0])
+			} else if IsPublicIP(extAgentIpv4) {
+				ret = append(ret, string(extAgentIpv4))
+			}
+		}
+	}
+	}*/
+	return ret, nil
+}
+
+func (agent *Agent) ConnectNetPeer(connectOpts map[string][]string) error {
+	//newConnOpts, err := getAvailableNetworksToConnect(connectOpts)
+	//if err != nil {
+	//	return err
+	//}
+	//fmt.Println(newConnOpts)
+	ctx := context.Background()
+	for aid, ips := range connectOpts {
+		for _, net := range ips {
+			ip := strings.Split(net, "/")
+			command2str := fmt.Sprintf("%s connect %s",
+				"/usr/local/bin/weave", ip[0])
+			command2, err := parseCommandLine(command2str)
+			if err != nil {
+				return fmt.Errorf("Error parsing command line (connect): %s", err)
+			}
+			err = exec.CommandContext(ctx, command2[0], command2[1:]...).Run()
+			if err != nil {
+				fmt.Printf("Error connecting Peer: %s", err)
+			}
+			commandstr := "/usr/local/bin/weave status peers"
+			command, err := parseCommandLine(commandstr)
+			if err != nil {
+				return fmt.Errorf("Error parsing command line (check peers): %s", err)
+			}
+			output, err := exec.CommandContext(ctx, command[0], command[1:]...).Output()
+			if err != nil {
+				return fmt.Errorf("Error checking connect state: %s", err)
+			}
+			success := strings.Contains(string(output), ip[0])
+			if success {
+				peers[aid] = append(peers[aid], ip[0])
+			}
+		}
+	}
+	return nil
+}
+
+type NetworkConnectOpts struct {
+	Peers map[string][]string `json:"peers"`
+}
+
+func (step *TaskStep) Network() error {
+	switch step.Method {
+	case "connect":
+		var connectOpts = NetworkConnectOpts{}
+		err := json.Unmarshal([]byte(step.PluginConfig), &connectOpts)
+		if err != nil {
+			return fmt.Errorf("Bad config for network connect: %s (%v)", err, step.PluginConfig)
+		}
+		err = agent.ConnectNetPeer(connectOpts.Peers)
+		if err != nil {
+			return fmt.Errorf("Cannot connect to any peers: %s", err)
+		}
+		return nil
+	default:
+		return fmt.Errorf("Unknown step method %s", step.Method)
+	}
 }
 
 func parseCommandLine(command string) ([]string, error) {
