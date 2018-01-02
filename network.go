@@ -40,6 +40,7 @@ func (agent *Agent) infiniteSyncAgentInterfaces() {
 func (agent *Agent) syncAgentInterfaces() error {
 	opt := CreateAgentOptions{
 		Interfaces: interfaces,
+		Peers:      peers,
 	}
 	uri := fmt.Sprintf("run/agents/%s/", agent.ID)
 	_, err := pikacloudClient.Put(uri, opt, &agent)
@@ -207,7 +208,6 @@ func getNewNets(nets map[string]string, containerID string) (map[string]string, 
 		tnets2 = append(tnets2, strings.Split(network, "-")[0])
 	}
 	diff := difference(tnets, tnets2)
-	fmt.Println(diff)
 
 	for _, net := range diff {
 		if stringInSlice(net, tnets2) {
@@ -239,7 +239,6 @@ func (agent *Agent) attachNetwork(containerID string, Networks map[string]string
 		if len(newNets) == 0 {
 			newNets = Networks
 		}
-		fmt.Println(newNets)
 		for network, domain := range newNets {
 			//nets
 			command := fmt.Sprintf("%s attach net:%s %s",
@@ -271,6 +270,54 @@ func (agent *Agent) attachNetwork(containerID string, Networks map[string]string
 	}
 
 	return nil
+}
+
+func findCommonPeers(oldPeers map[string][]string, newPeer string) map[string][]string {
+	ret := make(map[string][]string)
+	ctx := context.Background()
+
+	commandstr := "/usr/local/bin/weave status peers"
+	command, _ := parseCommandLine(commandstr)
+	output, _ := exec.CommandContext(ctx, command[0], command[1:]...).Output()
+	for peer, nets := range oldPeers {
+		for _, net := range nets {
+			ip := strings.Split(net, "/")
+			success := strings.Contains(string(output), ip[0])
+			if success {
+				ret[peer] = append(ret[peer], net)
+			}
+		}
+	}
+	aid := strings.Split(newPeer, ":")
+	ip := strings.Split(aid[1], "/")
+	success := strings.Contains(string(output), ip[0])
+	if success && !stringInSlice(aid[1], ret[aid[0]]) {
+		ret[aid[0]] = append(ret[aid[0]], aid[1])
+	}
+	return ret
+}
+
+func (agent *Agent) trackedPeersSyncer() {
+	logger.Debug("Starting Agent peers syncer")
+
+	defer func() {
+		logger.Debug("Agent peers syncer exited")
+	}()
+
+	for {
+		select {
+		case newPeer := <-agent.chSyncPeers:
+			realPeers := findCommonPeers(peers, newPeer)
+			if !reflect.DeepEqual(peers, realPeers) {
+				peers = realPeers
+				err := agent.syncAgentInterfaces()
+				if err != nil {
+					logger.Errorf("Cannot Sync Agent peers: %+v", err)
+					continue
+				}
+			}
+		}
+	}
 }
 
 func IsPublicIP(IP net.IP) bool {
@@ -307,20 +354,7 @@ func (agent *Agent) ConnectNetPeer(connectOpts map[string][]string) error {
 			if err != nil {
 				fmt.Printf("Error connecting Peer: %s", err)
 			}
-			commandstr := "/usr/local/bin/weave status peers"
-			command, err := parseCommandLine(commandstr)
-			if err != nil {
-				return fmt.Errorf("Error parsing command line (check peers): %s", err)
-			}
-			output, err := exec.CommandContext(ctx, command[0], command[1:]...).Output()
-			if err != nil {
-				return fmt.Errorf("Error checking connect state: %s", err)
-			}
-			success := strings.Contains(string(output), ip[0])
-			if success {
-				peers[aid] = append(peers[aid], ip[0])
-				fmt.Println(peers)
-			}
+			agent.chSyncPeers <- fmt.Sprintf("%s:%s", aid, net)
 		}
 	}
 	return nil

@@ -204,6 +204,8 @@ func main() {
 		logger.Fatalf("Unable to sync containers: %+v", errSync)
 	}
 
+	go agent.trackedPeersSyncer()
+
 	wg := sync.WaitGroup{}
 	defer func() {
 		wg.Wait()

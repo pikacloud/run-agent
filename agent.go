@@ -21,14 +21,15 @@ import (
 
 // CreateAgentOptions represents the agent Create() options
 type CreateAgentOptions struct {
-	Hostname   string   `json:"hostname"`
-	Labels     []string `json:"labels,omitempty"`
-	Localtime  int      `json:"localtime"`
-	Version    string   `json:"version"`
-	OS         string   `json:"os"`
-	Arch       string   `json:"arch"`
-	IP         string   `json:"ip"`
-	Interfaces []string `json:"interfaces"`
+	Hostname   string              `json:"hostname"`
+	Labels     []string            `json:"labels,omitempty"`
+	Localtime  int                 `json:"localtime"`
+	Version    string              `json:"version"`
+	OS         string              `json:"os"`
+	Arch       string              `json:"arch"`
+	IP         string              `json:"ip"`
+	Interfaces []string            `json:"interfaces"`
+	Peers      map[string][]string `json:"peers"`
 }
 
 // PingAgentOptions represents the agent Ping() options
@@ -54,6 +55,7 @@ type Agent struct {
 	chRegisterContainer   chan string
 	chDeregisterContainer chan string
 	chSyncContainer       chan string
+	chSyncPeers           chan string
 }
 
 func localtime() int {
@@ -84,6 +86,7 @@ func NewAgent(apiToken string, hostname string, labels []string) *Agent {
 		chRegisterContainer:   make(chan string),
 		chDeregisterContainer: make(chan string),
 		chSyncContainer:       make(chan string),
+		chSyncPeers:           make(chan string),
 	}
 }
 
@@ -105,6 +108,7 @@ func (agent *Agent) Register() error {
 		OS:        runtime.GOOS,
 		Arch:      runtime.GOARCH,
 		IP:        strings.TrimSpace(string(ip)),
+		Peers:     make(map[string][]string),
 	}
 	if len(agent.Labels) > 0 {
 		opt.Labels = agent.Labels
