@@ -137,7 +137,7 @@ func (agent *Agent) detachNetwork(containerID string, Networks map[string]string
 	return nil
 }
 
-func (agent *Agent) checkSuperNetwork(MasterIP []string) error {
+func (agent *Agent) checkSuperNetwork() error {
 	ctx := context.Background()
 	command, err := parseCommandLine("docker ps")
 	if err != nil {
@@ -235,10 +235,10 @@ func getNewNets(nets map[string]string, containerID string) (map[string]string, 
 }
 
 // attachNetwork describes available methods of the Network plugin
-func (agent *Agent) attachNetwork(containerID string, Networks map[string]string, MasterIP []string, Name string, NetPasswd string) error {
+func (agent *Agent) attachNetwork(containerID string, Networks map[string]string, Name string) error {
 	ctx := context.Background()
 
-	test := agent.checkSuperNetwork(MasterIP)
+	test := agent.checkSuperNetwork()
 	if test == nil {
 		newNets := Networks
 		if _, ok := networks[containerID]; ok {

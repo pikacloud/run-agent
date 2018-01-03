@@ -123,8 +123,7 @@ func (agent *Agent) Register() error {
 	if status != 200 {
 		return fmt.Errorf("Failed to create agent http code: %d", status)
 	}
-	var MasterIP []string
-	err = agent.checkSuperNetwork(MasterIP)
+	err = agent.checkSuperNetwork()
 	if err != nil {
 		return err
 	}
