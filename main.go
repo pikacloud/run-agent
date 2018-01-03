@@ -227,6 +227,8 @@ func main() {
 	wg.Add(1)
 	go agent.infiniteSyncAgentInterfaces()
 	wg.Add(1)
+	go agent.infiniteCheckForPeers()
+	wg.Add(1)
 	go agent.infinitePing()
 	wg.Add(1)
 	go agent.listenDockerEvents()

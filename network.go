@@ -22,10 +22,8 @@ func (agent *Agent) infiniteCheckForPeers() {
 			time.Sleep(30 * time.Second)
 			continue
 		}
-		if len(agent.ID) > 0 {
-			request := fmt.Sprintf("run/agents/%s/?send_peer", agent.ID)
-			pikacloudClient.Get(request, nil)
-		}
+		request := fmt.Sprintf("run/agents/%s/?send_peer", agent.ID)
+		pikacloudClient.Get(request, nil)
 		time.Sleep(30 * time.Second)
 	}
 }
