@@ -16,6 +16,20 @@ import (
 	fernet "github.com/fernet/fernet-go"
 )
 
+func (agent *Agent) infiniteCheckForPeers() {
+	for {
+		if len(peers) > 0 {
+			time.Sleep(30 * time.Second)
+			continue
+		}
+		if len(agent.ID) > 0 {
+			request := fmt.Sprintf("run/agents/%s/?send_peer", agent.ID)
+			pikacloudClient.Get(request, nil)
+		}
+		time.Sleep(30 * time.Second)
+	}
+}
+
 func (agent *Agent) infiniteSyncAgentInterfaces() {
 	for {
 		newInt, err := agent.getNetInterfaces()
