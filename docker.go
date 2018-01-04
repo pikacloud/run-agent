@@ -73,7 +73,6 @@ type DockerCreateOpts struct {
 	PullOpts       *DockerPullOpts   `json:"pull_opts"`
 	WaitForRunning int64             `json:"wait_for_running"`
 	Networks       map[string]string `json:"networks"`
-	MasterIP       []string          `json:"masterip"`
 	NetPasswd      string            `json:"netpasswd"`
 }
 
@@ -141,11 +140,10 @@ type DockerRestartOpts struct {
 
 // DockerRemoveOpts describes docker remove options
 type DockerRemoveOpts struct {
-	ID            string            `json:"id"`
-	Force         bool              `json:"force"`
-	RemoveLinks   bool              `json:"remove_links"`
-	RemoveVolumes bool              `json:"remove_volumes"`
-	Networks      map[string]string `json:"networks"`
+	ID            string `json:"id"`
+	Force         bool   `json:"force"`
+	RemoveLinks   bool   `json:"remove_links"`
+	RemoveVolumes bool   `json:"remove_volumes"`
 }
 
 // DockerTerminalOpts describes docker terminal options
@@ -442,13 +440,19 @@ func (agent *Agent) dockerPause(containerID string) error {
 	return nil
 }
 
-func (agent *Agent) dockerStop(containerID string, timeout time.Duration, Networks map[string]string) error {
+func (agent *Agent) dockerStop(containerID string, timeout time.Duration) error {
 	ctx := context.Background()
-	delete(networks, containerID)
-	if len(Networks) > 0 {
-		if err := agent.detachNetwork(containerID, Networks); err != nil {
+	if len(networks) > 0 {
+		var nets map[string]string
+		nets = make(map[string]string)
+		for _, net := range networks[containerID] {
+			temp := strings.Split(net, "-")
+			nets[temp[0]] = temp[1]
+		}
+		if err := agent.detachNetwork(containerID, nets); err != nil {
 			return err
 		}
+		delete(networks, containerID)
 	}
 	if err := agent.DockerClient.ContainerStop(ctx, containerID, &timeout); err != nil {
 		return err
@@ -507,11 +511,17 @@ func (agent *Agent) dockerRemove(containerID string, opts *DockerRemoveOpts) err
 		RemoveLinks:   opts.RemoveLinks,
 	}
 	ctx := context.Background()
-	delete(networks, containerID)
-	if len(opts.Networks) > 0 {
-		if err := agent.detachNetwork(containerID, opts.Networks); err != nil {
+	if len(networks) > 0 {
+		var nets map[string]string
+		nets = make(map[string]string)
+		for _, net := range networks[containerID] {
+			temp := strings.Split(net, "-")
+			nets[temp[0]] = temp[1]
+		}
+		if err := agent.detachNetwork(containerID, nets); err != nil {
 			return err
 		}
+		delete(networks, containerID)
 	}
 	if err := agent.DockerClient.ContainerRemove(ctx, containerID, removeOpts); err != nil {
 		return err
@@ -1441,7 +1451,7 @@ func (step *TaskStep) Docker() error {
 		if err != nil {
 			return fmt.Errorf("Bad config for docker unpause: %s (%v)", err, step.PluginConfig)
 		}
-		err = agent.dockerStop(stopOpts.ID, 10*time.Second, stopOpts.Networks)
+		err = agent.dockerStop(stopOpts.ID, 10*time.Second)
 		if err != nil {
 			return err
 		}
