@@ -16,7 +16,7 @@ func createTestAgent() error {
 		testMethod(nil, r, "POST")
 		fmt.Fprintf(w, "{\"aid\": \"toto\", \"hostname\": \"tata\", \"localtime\": %d}", safeLocaltime)
 	})
-	mux.HandleFunc("/v1/run/supernetwork/", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/v1/run/supernetwork/?aid=toto", func(w http.ResponseWriter, r *http.Request) {
 		testMethod(nil, r, "GET")
 		fmt.Fprint(w, `{"user":42, "key": "foobar"}`)
 	})
