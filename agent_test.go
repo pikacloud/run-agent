@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"reflect"
 	"testing"
+
+	"github.com/pikacloud/gopikacloud"
 )
 
 func createTestAgent() error {
@@ -14,8 +16,13 @@ func createTestAgent() error {
 		testMethod(nil, r, "POST")
 		fmt.Fprintf(w, "{\"aid\": \"toto\", \"hostname\": \"tata\", \"localtime\": %d}", safeLocaltime)
 	})
+	mux.HandleFunc("/v1/run/supernetwork/?aid=toto", func(w http.ResponseWriter, r *http.Request) {
+		testMethod(nil, r, "GET")
+		fmt.Fprint(w, `{"user":42, "key": "foobar"}`)
+	})
 	agent = NewAgent("foobar", "tata", nil)
 	agent.Client = client
+	pikacloudClient = gopikacloud.NewClient("tata")
 	err := agent.Register()
 	if err != nil {
 		return err
@@ -33,7 +40,12 @@ func TestAgentCreate(t *testing.T) {
 		testMethod(t, r, "POST")
 		fmt.Fprintf(w, "{\"aid\": \"toto\", \"hostname\": \"tata\", \"localtime\": %d}", safeLocaltime)
 	})
+	mux.HandleFunc("/v1/run/supernetwork/", func(w http.ResponseWriter, r *http.Request) {
+		testMethod(t, r, "GET")
+		fmt.Fprint(w, `{"user":42, "key": "foobar"}`)
+	})
 	agent = NewAgent("", "tata", nil)
+	pikacloudClient = gopikacloud.NewClient("tata")
 	agent.Client = client
 	err := agent.Register()
 	if err != nil {

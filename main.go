@@ -30,6 +30,7 @@ var (
 	runningTasksList  map[string]*Task
 	metrics           *Metrics
 	networks          map[string][]string
+	interfaces        []string
 	cpuprofile        = flag.String("cpuprofile", "", "write cpu profile to file")
 	showVersion       = flag.Bool("version", false, "show version")
 	showLatestVersion = flag.Bool("latest", false, "show latest version available")
@@ -44,6 +45,7 @@ var (
 	pikacloudClient   *gopikacloud.Client
 	logger            = logrus.New()
 	streamer          *Streamer
+	peers             map[string][]string
 )
 
 // PluginConfig describes a plugin option
@@ -111,6 +113,7 @@ func main() {
 	runningTasksList = make(map[string]*Task)
 	metrics = &Metrics{}
 	networks = make(map[string][]string)
+	peers = make(map[string][]string)
 	killchan := make(chan os.Signal, 2)
 	signal.Notify(killchan, syscall.SIGINT, syscall.SIGTERM)
 
@@ -180,6 +183,12 @@ func main() {
 		}
 	}
 
+	var erro error
+	interfaces, erro = agent.getNetInterfaces()
+	if erro != nil {
+		logger.Fatalf("Unable to get Agent net interfaces: %s", erro.Error())
+	}
+
 	err := agent.Register()
 	if err != nil {
 		logger.Fatalf("Unable to register agent: %s", err.Error())
@@ -194,6 +203,8 @@ func main() {
 	if errSync != nil {
 		logger.Fatalf("Unable to sync containers: %+v", errSync)
 	}
+
+	go agent.trackedPeersSyncer()
 
 	wg := sync.WaitGroup{}
 	defer func() {
@@ -213,6 +224,10 @@ func main() {
 	}
 	wg.Add(1)
 	go agent.infiniteSyncDockerInfo()
+	wg.Add(1)
+	go agent.infiniteSyncAgentInterfaces()
+	wg.Add(1)
+	go agent.infiniteCheckForPeers()
 	wg.Add(1)
 	go agent.infinitePing()
 	wg.Add(1)

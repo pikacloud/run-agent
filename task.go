@@ -69,6 +69,8 @@ func (step *TaskStep) Do() error {
 		return step.Docker()
 	case "git":
 		return step.Git()
+	case "network":
+		return step.Network()
 	default:
 		return fmt.Errorf("Unknown step plugin %s", step.Plugin)
 	}

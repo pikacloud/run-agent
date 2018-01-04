@@ -87,7 +87,6 @@ func (client *Client) sendRequest(method, path string, body io.Reader) (string, 
 		return "", 0, err
 	}
 	defer resp.Body.Close()
-
 	err = CheckResponse(resp)
 	if err != nil {
 		return "", resp.StatusCode, err

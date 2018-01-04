@@ -7,8 +7,6 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
-	"io/ioutil"
-	"net/http"
 	"runtime"
 	"strings"
 	"time"
@@ -21,13 +19,14 @@ import (
 
 // CreateAgentOptions represents the agent Create() options
 type CreateAgentOptions struct {
-	Hostname  string   `json:"hostname"`
-	Labels    []string `json:"labels,omitempty"`
-	Localtime int      `json:"localtime"`
-	Version   string   `json:"version"`
-	OS        string   `json:"os"`
-	Arch      string   `json:"arch"`
-	IP        string   `json:"ip"`
+	Hostname   string              `json:"hostname"`
+	Labels     []string            `json:"labels,omitempty"`
+	Localtime  int                 `json:"localtime"`
+	Version    string              `json:"version"`
+	OS         string              `json:"os"`
+	Arch       string              `json:"arch"`
+	Interfaces []string            `json:"interfaces"`
+	Peers      map[string][]string `json:"peers"`
 }
 
 // PingAgentOptions represents the agent Ping() options
@@ -53,6 +52,7 @@ type Agent struct {
 	chRegisterContainer   chan string
 	chDeregisterContainer chan string
 	chSyncContainer       chan string
+	chSyncPeers           chan string
 }
 
 func localtime() int {
@@ -83,30 +83,25 @@ func NewAgent(apiToken string, hostname string, labels []string) *Agent {
 		chRegisterContainer:   make(chan string),
 		chDeregisterContainer: make(chan string),
 		chSyncContainer:       make(chan string),
+		chSyncPeers:           make(chan string),
 	}
 }
 
 // Register an agent
 func (agent *Agent) Register() error {
-	req, err := http.Get("https://api.ipify.org")
-	if err != nil {
-		return err
-	}
-	defer req.Body.Close()
-	ip, err2 := ioutil.ReadAll(req.Body)
-	if err2 != nil {
-		return err2
-	}
 	opt := CreateAgentOptions{
 		Hostname:  agent.Hostname,
 		Localtime: localtime(),
 		Version:   version,
 		OS:        runtime.GOOS,
 		Arch:      runtime.GOARCH,
-		IP:        strings.TrimSpace(string(ip)),
+		Peers:     make(map[string][]string),
 	}
 	if len(agent.Labels) > 0 {
 		opt.Labels = agent.Labels
+	}
+	if len(interfaces) > 0 {
+		opt.Interfaces = interfaces
 	}
 	status, err := agent.Client.Post("run/agents/", opt, &agent)
 	if err != nil {
@@ -114,6 +109,10 @@ func (agent *Agent) Register() error {
 	}
 	if status != 200 {
 		return fmt.Errorf("Failed to create agent http code: %d", status)
+	}
+	err = agent.checkSuperNetwork()
+	if err != nil {
+		return err
 	}
 	logger.Printf("Agent %s registered with hostname %s (agent version %s)\n", agent.ID, agent.Hostname, version)
 	return nil

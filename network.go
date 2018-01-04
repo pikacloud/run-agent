@@ -2,11 +2,110 @@ package main
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"os/exec"
+	"reflect"
 	"strings"
+	"time"
+
+	docker_types "github.com/docker/docker/api/types"
+	fernet "github.com/fernet/fernet-go"
 )
+
+func (agent *Agent) infiniteCheckForPeers() {
+	for {
+		if len(peers) > 0 {
+			time.Sleep(30 * time.Second)
+			continue
+		}
+		request := fmt.Sprintf("run/agents/%s/?send_peer", agent.ID)
+		pikacloudClient.Get(request, nil)
+		time.Sleep(30 * time.Second)
+	}
+}
+
+func (agent *Agent) infiniteSyncAgentInterfaces() {
+	for {
+		newInt, err := agent.getNetInterfaces()
+		if err != nil {
+			time.Sleep(3 * time.Second)
+			continue
+		}
+
+		if !reflect.DeepEqual(interfaces, newInt) {
+			interfaces = newInt
+			err := agent.syncAgentInterfaces()
+			if err != nil {
+				logger.Infof("Cannot sync agent interfaces: %+v", err)
+			} else {
+				logger.Debug("Sync agent interfaces OK")
+			}
+		}
+		time.Sleep(3 * time.Second)
+	}
+}
+
+func (agent *Agent) syncAgentInterfaces() error {
+	opt := CreateAgentOptions{
+		Interfaces: interfaces,
+		Peers:      peers,
+	}
+	uri := fmt.Sprintf("run/agents/%s/", agent.ID)
+	_, err := pikacloudClient.Put(uri, opt, &agent)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+// getNetInterfaces describes the function who pushes all active interfaces from host to connect to network
+func (agent *Agent) getNetInterfaces() ([]string, error) {
+	var SysInt []string
+	var DockInt []string
+	var Ret []string
+	Cards, err := net.InterfaceAddrs()
+	if err != nil {
+		return Ret, err
+	}
+	for _, card := range Cards {
+		if ipnet, ok := card.(*net.IPNet); ok && !ipnet.IP.IsLoopback() {
+			if ipnet.IP.To4() != nil {
+				SysInt = append(SysInt, card.String())
+			}
+		}
+	}
+
+	ctx := context.Background()
+	nl, err := agent.DockerClient.NetworkList(ctx, docker_types.NetworkListOptions{})
+	if err != nil {
+		return Ret, err
+	}
+	for _, net := range nl {
+		if len(net.IPAM.Config) > 0 {
+			DockInt = append(DockInt, net.IPAM.Config[0].Subnet)
+		}
+	}
+	for _, scard := range SysInt {
+		_, ipv4Net, err2 := net.ParseCIDR(scard)
+		if err2 != nil {
+			return Ret, err2
+		}
+		test := true
+		for _, dcard := range DockInt {
+			if ipv4Net.String() == dcard {
+				test = false
+			}
+		}
+		if test == true {
+			Ret = append(Ret, scard)
+		}
+	}
+	return Ret, nil
+}
 
 // detachNetwork describes available methods of the Network plugin
 func (agent *Agent) detachNetwork(containerID string, Networks map[string]string) error {
@@ -38,9 +137,9 @@ func (agent *Agent) detachNetwork(containerID string, Networks map[string]string
 	return nil
 }
 
-func (agent *Agent) checkSuperNetwork(MasterIP string, NetPasswd string) error {
+func (agent *Agent) checkSuperNetwork() error {
 	ctx := context.Background()
-	command, err := parseCommandLine("/bin/ps aux")
+	command, err := parseCommandLine("docker ps")
 	if err != nil {
 		return fmt.Errorf("Error parsing command line (checking): %s", err)
 	}
@@ -52,8 +151,15 @@ func (agent *Agent) checkSuperNetwork(MasterIP string, NetPasswd string) error {
 	process := strings.Contains(test, "weave")
 
 	if process != true {
+		sn, err3 := pikacloudClient.SuperNetwork(agent.ID)
+		if err3 != nil {
+			return err3
+		}
+		key := base64.StdEncoding.EncodeToString([]byte(agent.ID))
+		k := fernet.MustDecodeKeys(key)
+		password := fernet.VerifyAndDecrypt([]byte(sn.Key), 60*time.Second, k)
 		command2 := fmt.Sprintf("%s launch --password=%s --ipalloc-range %s --dns-domain=%s %s",
-			"/usr/local/bin/weave", NetPasswd, "10.42.0.0/16", "pikacloud.local", "--plugin=false --proxy=false")
+			"/usr/local/bin/weave", string(password), "10.42.0.0/16", "pikacloud.local", "--plugin=false --proxy=false")
 		command, err = parseCommandLine(command2)
 		if err != nil {
 			return fmt.Errorf("Error parsing command line (create): %s", err)
@@ -61,30 +167,6 @@ func (agent *Agent) checkSuperNetwork(MasterIP string, NetPasswd string) error {
 		err = exec.CommandContext(ctx, command[0], command[1:]...).Run()
 		if err != nil {
 			return fmt.Errorf("Error creating Network: %s", err)
-		}
-	}
-
-	if len(MasterIP) > 0 {
-		command2 := "/usr/local/bin/weave status peers"
-		command, err = parseCommandLine(command2)
-		if err != nil {
-			return fmt.Errorf("Error parsing command line (check peers): %s", err)
-		}
-		output, err = exec.CommandContext(ctx, command[0], command[1:]...).Output()
-		if err != nil {
-			return fmt.Errorf("Error checking connect state: %s", err)
-		}
-		if strings.Count(string(output), "\n") <= 2 {
-			command2 = fmt.Sprintf("%s connect %s",
-				"/usr/local/bin/weave", MasterIP)
-			command, err = parseCommandLine(command2)
-			if err != nil {
-				return fmt.Errorf("Error parsing command line (connect): %s", err)
-			}
-			err = exec.CommandContext(ctx, command[0], command[1:]...).Run()
-			if err != nil {
-				return fmt.Errorf("Error connecting Peer: %s", err)
-			}
 		}
 	}
 	return nil
@@ -134,13 +216,10 @@ func getNewNets(nets map[string]string, containerID string) (map[string]string, 
 		tnets = append(tnets, net)
 	}
 
-	fmt.Println(tnets)
-	fmt.Println(networks[containerID])
 	for _, network := range networks[containerID] {
 		tnets2 = append(tnets2, strings.Split(network, "-")[0])
 	}
 	diff := difference(tnets, tnets2)
-	fmt.Println(diff)
 
 	for _, net := range diff {
 		if stringInSlice(net, tnets2) {
@@ -156,10 +235,10 @@ func getNewNets(nets map[string]string, containerID string) (map[string]string, 
 }
 
 // attachNetwork describes available methods of the Network plugin
-func (agent *Agent) attachNetwork(containerID string, Networks map[string]string, MasterIP string, Name string, NetPasswd string) error {
+func (agent *Agent) attachNetwork(containerID string, Networks map[string]string, Name string) error {
 	ctx := context.Background()
 
-	test := agent.checkSuperNetwork(MasterIP, NetPasswd)
+	test := agent.checkSuperNetwork()
 	if test == nil {
 		newNets := Networks
 		if _, ok := networks[containerID]; ok {
@@ -172,7 +251,6 @@ func (agent *Agent) attachNetwork(containerID string, Networks map[string]string
 		if len(newNets) == 0 {
 			newNets = Networks
 		}
-		fmt.Println(newNets)
 		for network, domain := range newNets {
 			//nets
 			command := fmt.Sprintf("%s attach net:%s %s",
@@ -199,31 +277,102 @@ func (agent *Agent) attachNetwork(containerID string, Networks map[string]string
 				if err != nil {
 					return fmt.Errorf("Error creating dns entry: %s", err)
 				}
-				//command = "/usr/local/bin/weave report | grep ':53' | cut -d: -f2 | cut -c 3-20"
-				//cmd = exec.CommandContext(ctx, "sh", "-c", command)
-				//IP, err = cmd.Output()
-				//if err != nil {
-				//	return fmt.Errorf("Error getting dns server: %s", err)
-				//}
-				//temp := fmt.Sprintf("search pikacloud.local\nnameserver %s\nnameserver 8.8.8.8", string(IP))
-				//	tmppath := fmt.Sprintf("/tmp/resolv.conf.%s", string(containerID))
-				//d1 := []byte(temp)
-				//err = ioutil.WriteFile(tmppath, d1, 0644)
-				//if err != nil {
-				//return fmt.Errorf("Error cannot write new resol.conf: %s", err)
-				//}
-				//command = fmt.Sprintf("docker cp %s %s:/etc/resolv.conf", tmppath, containerID)
-				//cmd = exec.CommandContext(ctx, "sh", "-c", command)
-				//err = cmd.Run()
-				//if err != nil {
-				//return fmt.Errorf("Error changing resolv.conf: %s", err)
-				//}
-				//os.Remove(tmppath)
 			}
 		}
 	}
 
 	return nil
+}
+
+func findCommonPeers(oldPeers map[string][]string, newPeer string) map[string][]string {
+	ret := make(map[string][]string)
+	ctx := context.Background()
+
+	commandstr := "/usr/local/bin/weave status peers"
+	command, _ := parseCommandLine(commandstr)
+	output, _ := exec.CommandContext(ctx, command[0], command[1:]...).Output()
+	for peer, nets := range oldPeers {
+		for _, net := range nets {
+			ip := strings.Split(net, "/")
+			success := strings.Contains(string(output), ip[0])
+			if success {
+				ret[peer] = append(ret[peer], net)
+			}
+		}
+	}
+	aid := strings.Split(newPeer, ":")
+	ip := strings.Split(aid[1], "/")
+	success := strings.Contains(string(output), ip[0])
+	if success && !stringInSlice(aid[1], ret[aid[0]]) {
+		ret[aid[0]] = append(ret[aid[0]], aid[1])
+	}
+	return ret
+}
+
+func (agent *Agent) trackedPeersSyncer() {
+	logger.Debug("Starting Agent peers syncer")
+
+	defer func() {
+		logger.Debug("Agent peers syncer exited")
+	}()
+
+	for {
+		select {
+		case newPeer := <-agent.chSyncPeers:
+			realPeers := findCommonPeers(peers, newPeer)
+			if !reflect.DeepEqual(peers, realPeers) {
+				peers = realPeers
+				err := agent.syncAgentInterfaces()
+				if err != nil {
+					logger.Errorf("Cannot Sync Agent peers: %+v", err)
+					continue
+				}
+			}
+		}
+	}
+}
+
+func (agent *Agent) ConnectNetPeer(connectOpts map[string][]string) error {
+	ctx := context.Background()
+	for aid, ips := range connectOpts {
+		for _, net := range ips {
+			ip := strings.Split(net, "/")
+			command2str := fmt.Sprintf("%s connect %s",
+				"/usr/local/bin/weave", ip[0])
+			command2, err := parseCommandLine(command2str)
+			if err != nil {
+				return fmt.Errorf("Error parsing command line (connect): %s", err)
+			}
+			err = exec.CommandContext(ctx, command2[0], command2[1:]...).Run()
+			if err != nil {
+				fmt.Printf("Error connecting Peer: %s", err)
+			}
+			agent.chSyncPeers <- fmt.Sprintf("%s:%s", aid, net)
+		}
+	}
+	return nil
+}
+
+type NetworkConnectOpts struct {
+	Peers map[string][]string `json:"peers"`
+}
+
+func (step *TaskStep) Network() error {
+	switch step.Method {
+	case "connect":
+		var connectOpts = NetworkConnectOpts{}
+		err := json.Unmarshal([]byte(step.PluginConfig), &connectOpts)
+		if err != nil {
+			return fmt.Errorf("Bad config for network connect: %s (%v)", err, step.PluginConfig)
+		}
+		err = agent.ConnectNetPeer(connectOpts.Peers)
+		if err != nil {
+			return fmt.Errorf("Cannot connect to any peers: %s", err)
+		}
+		return nil
+	default:
+		return fmt.Errorf("Unknown step method %s", step.Method)
+	}
 }
 
 func parseCommandLine(command string) ([]string, error) {
