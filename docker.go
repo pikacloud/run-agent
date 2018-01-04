@@ -141,10 +141,11 @@ type DockerRestartOpts struct {
 
 // DockerRemoveOpts describes docker remove options
 type DockerRemoveOpts struct {
-	ID            string `json:"id"`
-	Force         bool   `json:"force"`
-	RemoveLinks   bool   `json:"remove_links"`
-	RemoveVolumes bool   `json:"remove_volumes"`
+	ID            string            `json:"id"`
+	Force         bool              `json:"force"`
+	RemoveLinks   bool              `json:"remove_links"`
+	RemoveVolumes bool              `json:"remove_volumes"`
+	Networks      map[string]string `json:"networks"`
 }
 
 // DockerTerminalOpts describes docker terminal options
@@ -443,11 +444,11 @@ func (agent *Agent) dockerPause(containerID string) error {
 
 func (agent *Agent) dockerStop(containerID string, timeout time.Duration, Networks map[string]string) error {
 	ctx := context.Background()
+	delete(networks, containerID)
 	if len(Networks) > 0 {
 		if err := agent.detachNetwork(containerID, Networks); err != nil {
 			return err
 		}
-		networks[containerID] = []string{""}
 	}
 	if err := agent.DockerClient.ContainerStop(ctx, containerID, &timeout); err != nil {
 		return err
@@ -506,6 +507,12 @@ func (agent *Agent) dockerRemove(containerID string, opts *DockerRemoveOpts) err
 		RemoveLinks:   opts.RemoveLinks,
 	}
 	ctx := context.Background()
+	delete(networks, containerID)
+	if len(opts.Networks) > 0 {
+		if err := agent.detachNetwork(containerID, opts.Networks); err != nil {
+			return err
+		}
+	}
 	if err := agent.DockerClient.ContainerRemove(ctx, containerID, removeOpts); err != nil {
 		return err
 	}
