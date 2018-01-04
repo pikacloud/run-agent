@@ -40,7 +40,6 @@ type PingAgentOptions struct {
 
 // Agent describes the agent
 type Agent struct {
-	Client                *Client
 	DockerClient          *docker_client.Client
 	ID                    string            `json:"aid"`
 	PingURL               string            `json:"ping_url"`
@@ -53,6 +52,7 @@ type Agent struct {
 	chDeregisterContainer chan string
 	chSyncContainer       chan string
 	chSyncPeers           chan string
+	startNetworking       bool
 }
 
 func localtime() int {
@@ -74,16 +74,16 @@ func makeLabels(labels string) []string {
 }
 
 // NewAgent create a new agent
-func NewAgent(apiToken string, hostname string, labels []string) *Agent {
+func NewAgent(hostname string, labels []string, startNetworking bool) *Agent {
 	return &Agent{
 		Hostname:              hostname,
-		Client:                NewClient(apiToken),
 		DockerClient:          NewDockerClient(),
 		Labels:                labels,
 		chRegisterContainer:   make(chan string),
 		chDeregisterContainer: make(chan string),
 		chSyncContainer:       make(chan string),
 		chSyncPeers:           make(chan string),
+		startNetworking:       startNetworking,
 	}
 }
 
@@ -103,16 +103,18 @@ func (agent *Agent) Register() error {
 	if len(interfaces) > 0 {
 		opt.Interfaces = interfaces
 	}
-	status, err := agent.Client.Post("run/agents/", opt, &agent)
+	status, err := pikacloudClient.Post("run/agents/", opt, &agent)
 	if err != nil {
 		return err
 	}
 	if status != 200 {
 		return fmt.Errorf("Failed to create agent http code: %d", status)
 	}
-	err = agent.checkSuperNetwork()
-	if err != nil {
-		return err
+	if agent.startNetworking {
+		err = agent.checkSuperNetwork()
+		if err != nil {
+			return fmt.Errorf("Unable to check supernetworks: %+v", err)
+		}
 	}
 	logger.Printf("Agent %s registered with hostname %s (agent version %s)\n", agent.ID, agent.Hostname, version)
 	return nil
@@ -173,7 +175,7 @@ func (agent *Agent) Ping() error {
 	for t := range runningTerminalsList {
 		opts.RunningTerminals = append(opts.RunningTerminals, t.Tid)
 	}
-	status, err := agent.Client.Post(pingURI, opts, nil)
+	status, err := pikacloudClient.Post(pingURI, opts, nil)
 	if err != nil {
 		return err
 	}
@@ -181,7 +183,6 @@ func (agent *Agent) Ping() error {
 		return fmt.Errorf("ping to %s returns %d codes", pingURI, status)
 	}
 	nbGoroutines := runtime.NumGoroutine()
-	// logger.Debugf("Ping OK (%d running task%s, %d running terminal%s, %d goroutine%s)", len(opts.RunningTasks), pluralize(len(opts.RunningTasks)), len(opts.RunningTerminals), pluralize(len(opts.RunningTerminals)), nbGoroutines, pluralize(nbGoroutines))
 	logger.WithFields(logrus.Fields{
 		"tasks":         len(opts.RunningTasks),
 		"terminals":     len(opts.RunningTerminals),
@@ -194,7 +195,7 @@ func (agent *Agent) Ping() error {
 
 func (agent *Agent) ackTask(task *Task, taskACK *TaskACK) error {
 	ackURI := fmt.Sprintf("run/agents/%s/tasks/unack/%s/", agent.ID, task.ID)
-	_, err := agent.Client.Delete(ackURI, &taskACK, nil)
+	_, err := pikacloudClient.Delete(ackURI, &taskACK, nil)
 	if err != nil {
 		logger.Error(err)
 		return err
@@ -238,7 +239,7 @@ func (agent *Agent) infinitePullTasks() {
 func (agent *Agent) pullTasks() ([]*Task, error) {
 	tasksURI := fmt.Sprintf("run/agents/%s/tasks/ready/?requeue=false&size=50", agent.ID)
 	tasks := []*Task{}
-	err := agent.Client.Get(tasksURI, &tasks)
+	err := pikacloudClient.Get(tasksURI, &tasks)
 	if err != nil {
 		return nil, err
 	}
@@ -258,7 +259,7 @@ type versionUpdate struct {
 func (agent *Agent) getLatestVersion() (*versionUpdate, error) {
 	versionURI := fmt.Sprintf("run/agent-version/latest/?os=%s&arch=%s", runtime.GOOS, runtime.GOARCH)
 	v := &versionUpdate{}
-	err := agent.Client.Get(versionURI, &v)
+	err := pikacloudClient.Get(versionURI, &v)
 	if err != nil {
 		return nil, err
 	}

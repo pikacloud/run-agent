@@ -1146,7 +1146,7 @@ func (agent *Agent) syncDockerInfo(info docker_types.Info) error {
 	pingInfo := AgentDockerInfo{
 		Info: info,
 	}
-	status, err := agent.Client.Put(uri, pingInfo, nil)
+	status, err := pikacloudClient.Put(uri, pingInfo, nil)
 	if err != nil {
 		return err
 	}
@@ -1224,7 +1224,7 @@ func (agent *Agent) forceSyncTrackedDockerContainers() error {
 
 func (agent *Agent) syncDockerContainers(containers []*AgentContainer) error {
 	uri := fmt.Sprintf("run/agents/%s/docker/containers/", agent.ID)
-	status, err := agent.Client.Post(uri, containers, nil)
+	status, err := pikacloudClient.Post(uri, containers, nil)
 	if err != nil {
 		return err
 	}
@@ -1262,7 +1262,7 @@ func (agent *Agent) syncDockerContainers(containers []*AgentContainer) error {
 
 func (agent *Agent) unsyncDockerContainer(containerID string) error {
 	deleteContainerURI := fmt.Sprintf("run/agents/%s/docker/containers/%s/", agent.ID, containerID)
-	_, err := agent.Client.Delete(deleteContainerURI, nil, nil)
+	_, err := pikacloudClient.Delete(deleteContainerURI, nil, nil)
 	if err != nil {
 		return fmt.Errorf("Cannot delete container %s in API: %+v", containerID, err)
 	}

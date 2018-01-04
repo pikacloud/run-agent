@@ -4,6 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -46,6 +47,9 @@ var (
 	logger            = logrus.New()
 	streamer          *Streamer
 	peers             map[string][]string
+	httpClient        = &http.Client{
+		Timeout: time.Second * 10,
+	}
 )
 
 // PluginConfig describes a plugin option
@@ -171,10 +175,7 @@ func main() {
 		}
 		hostname = h
 	}
-	agent = NewAgent(apiToken, hostname, labels)
-	if baseURL != "" {
-		agent.Client.BaseURL = baseURL
-	}
+	agent = NewAgent(hostname, labels, true)
 	if *updaterMode {
 		logger.Info("Checking for run-agent updates")
 		errUpdate := agent.update()

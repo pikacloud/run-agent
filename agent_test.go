@@ -3,26 +3,48 @@ package main
 import (
 	"fmt"
 	"net/http"
+	"net/http/httptest"
 	"reflect"
 	"testing"
 
 	"github.com/pikacloud/gopikacloud"
 )
 
+var (
+	pikaTestMux *http.ServeMux
+	testServer  *httptest.Server
+)
+
+func setup() {
+	pikaTestMux = http.NewServeMux()
+	testServer = httptest.NewServer(pikaTestMux)
+	apiToken = "mytoken"
+	pikacloudClient = gopikacloud.NewClient(apiToken)
+	pikacloudClient.BaseURL = testServer.URL + "/"
+}
+
+func teardown() {
+	testServer.Close()
+}
+
+func testMethod(t *testing.T, r *http.Request, want string) {
+	if want != r.Method {
+		t.Errorf("Request method = %v, want %v", r.Method, want)
+	}
+}
+
 func createTestAgent() error {
 	version = "undefined"
 	safeLocaltime := localtime()
-	mux.HandleFunc("/v1/run/agents/", func(w http.ResponseWriter, r *http.Request) {
+	pikaTestMux.HandleFunc("/v1/run/agents/", func(w http.ResponseWriter, r *http.Request) {
 		testMethod(nil, r, "POST")
 		fmt.Fprintf(w, "{\"aid\": \"toto\", \"hostname\": \"tata\", \"localtime\": %d}", safeLocaltime)
 	})
-	mux.HandleFunc("/v1/run/supernetwork/?aid=toto", func(w http.ResponseWriter, r *http.Request) {
+	pikaTestMux.HandleFunc("/v1/run/supernetwork/", func(w http.ResponseWriter, r *http.Request) {
 		testMethod(nil, r, "GET")
 		fmt.Fprint(w, `{"user":42, "key": "foobar"}`)
 	})
-	agent = NewAgent("foobar", "tata", nil)
-	agent.Client = client
-	pikacloudClient = gopikacloud.NewClient("tata")
+	agent = NewAgent("tata", nil, false)
 	err := agent.Register()
 	if err != nil {
 		return err
@@ -35,19 +57,7 @@ func createTestAgent() error {
 func TestAgentCreate(t *testing.T) {
 	setup()
 	defer teardown()
-	safeLocaltime := localtime()
-	mux.HandleFunc("/v1/run/agents/", func(w http.ResponseWriter, r *http.Request) {
-		testMethod(t, r, "POST")
-		fmt.Fprintf(w, "{\"aid\": \"toto\", \"hostname\": \"tata\", \"localtime\": %d}", safeLocaltime)
-	})
-	mux.HandleFunc("/v1/run/supernetwork/", func(w http.ResponseWriter, r *http.Request) {
-		testMethod(t, r, "GET")
-		fmt.Fprint(w, `{"user":42, "key": "foobar"}`)
-	})
-	agent = NewAgent("", "tata", nil)
-	pikacloudClient = gopikacloud.NewClient("tata")
-	agent.Client = client
-	err := agent.Register()
+	err := createTestAgent()
 	if err != nil {
 		t.Errorf("Cannot create agent: %v", err)
 	}
@@ -83,7 +93,7 @@ func TestAgentPing(t *testing.T) {
 	setup()
 	defer teardown()
 
-	mux.HandleFunc("/v1/run/agents/toto/ping/", func(w http.ResponseWriter, r *http.Request) {
+	pikaTestMux.HandleFunc("/v1/run/agents/toto/ping/", func(w http.ResponseWriter, r *http.Request) {
 		testMethod(t, r, "POST")
 		fmt.Fprint(w, `{"status": "OK"}`)
 	})
@@ -103,7 +113,7 @@ func TestAgentLatestVersion(t *testing.T) {
 	setup()
 	defer teardown()
 	// testURI := fmt.Sprintf("/v1/run/agent_version/latest/?from=%s&os=%s&arch=%s", version, runtime.GOOS, runtime.GOARCH)
-	mux.HandleFunc("/v1/run/agent-version/latest/", func(w http.ResponseWriter, r *http.Request) {
+	pikaTestMux.HandleFunc("/v1/run/agent-version/latest/", func(w http.ResponseWriter, r *http.Request) {
 		testMethod(t, r, "GET")
 		fmt.Fprint(w, `{"version": "1.0.1", "archive_url":"http://foo.bar/agent.tar.gz"}`)
 	})

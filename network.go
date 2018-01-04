@@ -150,12 +150,14 @@ func (agent *Agent) checkSuperNetwork() error {
 	test := string(output)
 	process := strings.Contains(test, "weave")
 
-	if process != true {
-		sn, err3 := pikacloudClient.SuperNetwork(agent.ID)
-		if err3 != nil {
-			return err3
+	if !process {
+		sn, errGetSuperNetwork := pikacloudClient.SuperNetwork(agent.ID)
+		if errGetSuperNetwork != nil {
+			return errGetSuperNetwork
 		}
-		key := base64.StdEncoding.EncodeToString([]byte(agent.ID))
+		bytesKey := make([]byte, 32)
+		copy(bytesKey, []byte(agent.ID))
+		key := base64.StdEncoding.EncodeToString(bytesKey)
 		k := fernet.MustDecodeKeys(key)
 		password := fernet.VerifyAndDecrypt([]byte(sn.Key), 60*time.Second, k)
 		command2 := fmt.Sprintf("%s launch --password=%s --ipalloc-range %s --dns-domain=%s %s",

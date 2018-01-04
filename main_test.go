@@ -4,14 +4,6 @@ import (
 	"testing"
 )
 
-func TestNewClient(t *testing.T) {
-	c := NewClient("mytoken")
-
-	if c.BaseURL != defaultBaseURL {
-		t.Errorf("NewClient BaseURL = %v, want %v", c.BaseURL, defaultBaseURL)
-	}
-}
-
 func TestDeleteRunningTasks(t *testing.T) {
 	runningTasksList = make(map[string]*Task)
 	runningTasksList["t1"] = &Task{}
