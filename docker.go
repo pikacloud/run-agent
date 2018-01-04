@@ -88,6 +88,12 @@ type ExternalAuthPullOpts struct {
 	Password string `json:"password"`
 }
 
+// DockerImageTagOpts describes docker tag options
+type DockerImageTagOpts struct {
+	Source string `json:"source_image"`
+	Target string `json:"target_image"`
+}
+
 // DockerPullOpts describes docker pull options
 type DockerPullOpts struct {
 	Image                string                `json:"image"`
@@ -95,6 +101,9 @@ type DockerPullOpts struct {
 	ExternalAuth         *ExternalAuthPullOpts `json:"external_registry_auth"`
 	InternalRegistryAuth bool                  `json:"internal_registry_auth"`
 }
+
+// DockerPushOpts describes docker push options
+type DockerPushOpts DockerPullOpts
 
 func (e *ExternalAuthPullOpts) registryAuthString(aid string) string {
 	key := base64.StdEncoding.EncodeToString([]byte(aid))
@@ -157,11 +166,12 @@ type DockerTerminalOpts struct {
 
 // DockerBuildOpts describes docker build options
 type DockerBuildOpts struct {
-	Tag           string `json:"tag"`
-	Path          string `json:"path"`
-	ClearBuildDir bool   `json:"clear_build_dir"`
-	BuildID       string `json:"build_id"`
-	RemoveImage   bool   `json:"remove_image_after_build"`
+	Tag                               string `json:"tag"`
+	Path                              string `json:"path"`
+	ClearBuildDir                     bool   `json:"clear_build_dir"`
+	BuildID                           string `json:"build_id"`
+	RemoveIntermediateContainers      bool   `json:"remove_intermediate_containers"`
+	ForceRemoveIntermediateContainers bool   `json:"force_remove_intermediate_containers"`
 }
 
 var (
@@ -291,6 +301,55 @@ func (agent *Agent) initTrackedContainers() error {
 	}
 	return nil
 }
+
+func (step *TaskStep) dockerPush(opts *DockerPushOpts) error {
+	step.stream([]byte(fmt.Sprintf("\033[33m[PUSH]\033[0m Pushing docker image %s\n", opts.Image)))
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	pushOpts := docker_types.ImagePushOptions{}
+	if opts.InternalRegistryAuth {
+		pushOpts.RegistryAuth = agent.internalRegistryAuthString()
+	} else {
+		if opts.ExternalAuth != nil {
+			pushOpts.RegistryAuth = opts.ExternalAuth.registryAuthString(agent.ID)
+		}
+	}
+	out, err := agent.DockerClient.ImagePush(ctx, opts.Image, pushOpts)
+	if err != nil {
+		return err
+	}
+	defer out.Close()
+	scanner := bufio.NewScanner(out)
+	wasInProgress := false
+	for scanner.Scan() {
+		j := jsonmessage.JSONMessage{}
+		err := json.Unmarshal(scanner.Bytes(), &j)
+		if err != nil {
+			continue
+		}
+		if j.Error != nil {
+			return fmt.Errorf("docker push failed: %s", j.Error.Message)
+		}
+		if j.Stream != "" {
+			step.stream([]byte(j.Stream))
+		}
+		if j.Status != "" {
+			if j.Progress != nil {
+				wasInProgress = true
+				step.stream([]byte(fmt.Sprintf("%s\r", j.Status)))
+			} else {
+				if wasInProgress {
+					step.stream([]byte("\n"))
+					wasInProgress = false
+				}
+				step.stream([]byte(fmt.Sprintf("%s\r\n", j.Status)))
+			}
+		}
+	}
+	logger.Infof("Image %s pushed to registry", opts.Image)
+	return nil
+}
+
 func (agent *Agent) dockerPull(opts *DockerPullOpts) error {
 	ctx := context.Background()
 	pullOpts := docker_types.ImagePullOptions{}
@@ -552,7 +611,11 @@ type IDPair struct {
 }
 
 func (step *TaskStep) dockerBuild(opts *DockerBuildOpts) error {
-	defer os.RemoveAll(opts.Path)
+	defer func() {
+		if opts.ClearBuildDir {
+			os.RemoveAll(opts.Path)
+		}
+	}()
 	logger.Infof("Building image %s", opts.Tag)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -579,11 +642,12 @@ func (step *TaskStep) dockerBuild(opts *DockerBuildOpts) error {
 	progressOutput := streamformatter.NewStreamFormatter().NewProgressOutput(step.Task.streamer.ioWriter, true)
 	body = progress.NewProgressReader(buildCtx, progressOutput, 0, "", "Sending build context to Docker daemon")
 	buildOpts := docker_types.ImageBuildOptions{
-		NoCache:    true,
-		Dockerfile: relDockerfile,
-		Tags:       []string{opts.Tag},
-		Remove:     opts.RemoveImage,
-		PullParent: true,
+		NoCache:     true,
+		Dockerfile:  relDockerfile,
+		Tags:        []string{opts.Tag},
+		Remove:      opts.RemoveIntermediateContainers,
+		ForceRemove: opts.ForceRemoveIntermediateContainers,
+		PullParent:  true,
 	}
 	step.stream([]byte(fmt.Sprintf("\033[33m[BUILD]\033[0m Building docker image %s\n", opts.Tag)))
 	buildResponse, err := agent.DockerClient.ImageBuild(ctx, body, buildOpts)
@@ -1386,6 +1450,16 @@ func (step *TaskStep) Docker() error {
 			return err
 		}
 		return nil
+	case "tag":
+		var tagOpts = DockerImageTagOpts{}
+		err := json.Unmarshal([]byte(step.PluginConfig), &tagOpts)
+		if err != nil {
+			return fmt.Errorf("Bad config for docker tag: %s (%v)", err, step.PluginConfig)
+		}
+		if err := agent.DockerClient.ImageTag(context.Background(), tagOpts.Source, tagOpts.Target); err != nil {
+			return fmt.Errorf("Unable to tag image: %+v", err)
+		}
+		return nil
 	case "build":
 		var buildOpts = DockerBuildOpts{}
 		err := json.Unmarshal([]byte(step.PluginConfig), &buildOpts)
@@ -1393,6 +1467,17 @@ func (step *TaskStep) Docker() error {
 			return fmt.Errorf("Bad config for docker build: %s (%v)", err, step.PluginConfig)
 		}
 		err = step.dockerBuild(&buildOpts)
+		if err != nil {
+			return err
+		}
+		return nil
+	case "push":
+		var pushOpts = DockerPushOpts{}
+		err := json.Unmarshal([]byte(step.PluginConfig), &pushOpts)
+		if err != nil {
+			return fmt.Errorf("Bad config for docker push: %s (%v)", err, step.PluginConfig)
+		}
+		err = step.dockerPush(&pushOpts)
 		if err != nil {
 			return err
 		}
