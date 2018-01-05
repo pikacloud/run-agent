@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net"
 	"os/exec"
@@ -168,7 +167,7 @@ func (agent *Agent) checkSuperNetwork() error {
 		}
 		err = exec.CommandContext(ctx, command[0], command[1:]...).Run()
 		if err != nil {
-			return fmt.Errorf("Error creating Network: %s", err)
+			return fmt.Errorf("Error creating supernetwork: %+v", err)
 		}
 	}
 	return nil
@@ -214,7 +213,7 @@ func getNewNets(nets map[string]string, containerID string) (map[string]string, 
 
 	ret = make(map[string]string)
 	delete = make(map[string]string)
-	for net, _ := range nets {
+	for net := range nets {
 		tnets = append(tnets, net)
 	}
 
@@ -334,11 +333,21 @@ func (agent *Agent) trackedPeersSyncer() {
 	}
 }
 
+// ConnectNetPeer connects agent to other peers
 func (agent *Agent) ConnectNetPeer(connectOpts map[string][]string) error {
+	if len(connectOpts) == 0 {
+		logger.Debug("No peers to connect to")
+		return nil
+	}
 	ctx := context.Background()
 	for aid, ips := range connectOpts {
+		if len(ips) == 0 {
+			logger.Debugf("Peer %s reporting no interface to connect to", aid)
+			continue
+		}
 		for _, net := range ips {
 			ip := strings.Split(net, "/")
+			logger.Debugf("Try to connect to peer %s %s", aid, ip[0])
 			command2str := fmt.Sprintf("%s connect %s",
 				"/usr/local/bin/weave", ip[0])
 			command2, err := parseCommandLine(command2str)
@@ -347,18 +356,21 @@ func (agent *Agent) ConnectNetPeer(connectOpts map[string][]string) error {
 			}
 			err = exec.CommandContext(ctx, command2[0], command2[1:]...).Run()
 			if err != nil {
-				fmt.Printf("Error connecting Peer: %s", err)
+				logger.Debugf("Error connecting to peer %s %s: %s", aid, ip[0], err)
 			}
+			logger.Debugf("Connected to peer %s %s", aid, ip[0])
 			agent.chSyncPeers <- fmt.Sprintf("%s:%s", aid, net)
 		}
 	}
 	return nil
 }
 
+// NetworkConnectOpts describes the connect to peers structure
 type NetworkConnectOpts struct {
 	Peers map[string][]string `json:"peers"`
 }
 
+// Network handles networking operations
 func (step *TaskStep) Network() error {
 	switch step.Method {
 	case "connect":
@@ -425,7 +437,7 @@ func parseCommandLine(command string) ([]string, error) {
 		}
 	}
 	if state == "quotes" {
-		return []string{}, errors.New(fmt.Sprintf("Unclosed quote in command line: %s", command))
+		return []string{}, fmt.Errorf("Unclosed quote in command line: %s", command)
 	}
 	if current != "" {
 		args = append(args, current)
