@@ -124,7 +124,7 @@
   branch = "master"
   name = "github.com/pikacloud/gopikacloud"
   packages = ["."]
-  revision = "527241667b18e7ecc8fb7ecfcec5bf5147b4e2a9"
+  revision = "6aa46f2993e77829f10e6316d64bc4a359b2355f"
 
 [[projects]]
   name = "github.com/pkg/errors"

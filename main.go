@@ -25,29 +25,29 @@ const (
 )
 
 var (
-	apiToken          string
-	baseURL           string
-	agent             *Agent
-	runningTasksList  map[string]*Task
-	metrics           *Metrics
-	networks          map[string][]string
-	interfaces        []string
-	cpuprofile        = flag.String("cpuprofile", "", "write cpu profile to file")
-	showVersion       = flag.Bool("version", false, "show version")
-	showLatestVersion = flag.Bool("latest", false, "show latest version available")
-	autoMode          = flag.Bool("auto", false, "run with self updating mode activated")
-	updaterMode       = flag.Bool("updater", false, "self update binary if necessary")
-	wsURL             = "wss://ws.pikacloud.com"
-	isXhyve           = false
-	xhyveTTY          = "~/Library/Containers/com.docker.docker/Data/com.docker.driver.amd64-linux/tty"
-	version           string
-	gitRef            string
-	lock              = sync.RWMutex{}
-	pikacloudClient   *gopikacloud.Client
-	logger            = logrus.New()
-	streamer          *Streamer
-	peers             map[string][]string
-	httpClient        = &http.Client{
+	apiToken                string
+	baseURL                 string
+	agent                   *Agent
+	runningTasksList        map[string]*Task
+	metrics                 *Metrics
+	networks                map[string][]string
+	interfaces              []string
+	cpuprofile              = flag.String("cpuprofile", "", "write cpu profile to file")
+	showVersion             = flag.Bool("version", false, "show version")
+	autoMode                = flag.Bool("auto", false, "run with self updating mode activated")
+	updaterMode             = flag.Bool("updater", false, "self update binary if necessary")
+	wsURL                   = "wss://ws.pikacloud.com"
+	agentSuperNetworkCIDR   = "10.42.0.0/16"
+	agentSuperNetworkDomain = "pikacloud.local"
+	isXhyve                 = false
+	xhyveTTY                = "~/Library/Containers/com.docker.docker/Data/com.docker.driver.amd64-linux/tty"
+	version                 string
+	gitRef                  string
+	lock                    = sync.RWMutex{}
+	pikacloudClient         *gopikacloud.Client
+	logger                  = logrus.New()
+	streamer                *Streamer
+	httpClient              = &http.Client{
 		Timeout: time.Second * 10,
 	}
 )
@@ -61,11 +61,6 @@ func pluralize(n int) string {
 		return "s"
 	}
 	return ""
-}
-
-func shutdown(exitCode int) {
-	logger.Println("Shutting down run-agent...")
-	os.Exit(exitCode)
 }
 
 func execAgent() (*exec.Cmd, error) {
@@ -117,7 +112,6 @@ func main() {
 	runningTasksList = make(map[string]*Task)
 	metrics = &Metrics{}
 	networks = make(map[string][]string)
-	peers = make(map[string][]string)
 	killchan := make(chan os.Signal, 2)
 	signal.Notify(killchan, syscall.SIGINT, syscall.SIGTERM)
 
@@ -147,6 +141,12 @@ func main() {
 	baseURL = os.Getenv("PIKACLOUD_AGENT_URL")
 	hostname := os.Getenv("PIKACLOUD_AGENT_HOSTNAME")
 	envLabels := os.Getenv("PIKACLOUD_AGENT_LABELS")
+	if os.Getenv("PIKACLOUD_SUPERNETWORK_CIDR") != "" {
+		agentSuperNetworkCIDR = os.Getenv("PIKACLOUD_SUPERNETWORK_CIDR")
+	}
+	if os.Getenv("PIKACLOUD_SUPERNETWORK_DOMAIN") != "" {
+		agentSuperNetworkDomain = os.Getenv("PIKACLOUD_SUPERNETWORK_DOMAIN")
+	}
 	wsURLenv := os.Getenv("PIKACLOUD_WS_URL")
 	isXhyvEnv := os.Getenv("PIKACLOUD_XHYVE")
 	xhyveTTYEnv := os.Getenv("PIKACLOUD_XHYVE_TTY")
@@ -194,6 +194,7 @@ func main() {
 	if err != nil {
 		logger.Fatalf("Unable to register agent: %s", err.Error())
 	}
+	go agent.infiniteSyncNetworkRouterStatus()
 	go agent.trackedDockerContainersSyncer()
 	errTracked := agent.initTrackedContainers()
 	if errTracked != nil {
@@ -204,8 +205,6 @@ func main() {
 	if errSync != nil {
 		logger.Fatalf("Unable to sync containers: %+v", errSync)
 	}
-
-	go agent.trackedPeersSyncer()
 
 	wg := sync.WaitGroup{}
 	defer func() {
@@ -219,16 +218,9 @@ func main() {
 	if err != nil {
 		logger.Fatal(err)
 	}
-
 	for _, container := range managedContainers {
 		agent.containerLogger(container.ID, true)
 	}
-	wg.Add(1)
-	go agent.infiniteSyncDockerInfo()
-	wg.Add(1)
-	go agent.infiniteSyncAgentInterfaces()
-	wg.Add(1)
-	go agent.infiniteCheckForPeers()
 	wg.Add(1)
 	go agent.infinitePing()
 	wg.Add(1)
@@ -240,5 +232,5 @@ func main() {
 	catchedSignal := <-killchan
 	logger.Debugf("Signal %d catched", catchedSignal)
 	pprof.StopCPUProfile()
-	shutdown(0)
+	shutdown(0, "Agent terminated")
 }

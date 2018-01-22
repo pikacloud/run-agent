@@ -56,6 +56,8 @@ $ [Env Variables...] ./run-agent
 | PIKACLOUD_AGENT_URL | `https://pikacloud.com/api/` |Pikacloud API URL |
 | PIKACLOUD_AGENT_HOSTNAME | None | Override hostname reported by the agent  |
 | PIKACLOUD_AGENT_LABELS | None |List of strings separated by a comma `"aws,eu-west-1a,nginx,magento"` |
+| PIKACLOUD_SUPERNETWORK_CIDR | 10.42.0.0/16 | Agents network CIDR |
+| PIKACLOUD_SUPERNETWORK_DOMAIN | pikacloud.local | Root domain for container DNS entries |
 | PIKACLOUD_WS_URL | `wss://ws.pikacloud.com`| Pikacloud Websocket server |
 | PIKACLOUD_XHYVE  | false | Darwin specifics for garbase collecting interrupted docker exec |
 | PIKACLOUD_XHYVE_TTY  | `~/Library/Containers/com.docker.docker/Data/com.docker.driver.amd64-linux/tty`  | Darwin specific path of xhyve VM tty |

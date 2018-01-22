@@ -20,6 +20,8 @@ dockers:
   - image: pikacloud/run-agent
     latest: true
     dockerfile: Dockerfile.release
+    extra_files:
+    - scripts/weave
 archive:
   format: tar.gz
   name_template: '{{ .Binary }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}{{ if .Arm }}v{{

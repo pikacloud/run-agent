@@ -99,7 +99,7 @@ func (s *Streamer) run() {
 			time.Sleep(3 * time.Second)
 			continue
 		}
-		logger.Infof("Streamer connected to %s", u.String())
+		logger.Debugf("Streamer connected to %s", u.String())
 		s.authRequest <- &StreamAuthRequest{
 			Token: apiToken,
 		}

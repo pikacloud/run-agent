@@ -2,8 +2,8 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -12,13 +12,10 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"reflect"
 	"runtime"
 	"strconv"
 	"strings"
 	"time"
-
-	"github.com/fernet/fernet-go"
 
 	docker_types "github.com/docker/docker/api/types"
 	docker_types_container "github.com/docker/docker/api/types/container"
@@ -72,8 +69,8 @@ type DockerCreateOpts struct {
 	Labels         map[string]string `json:"labels"`
 	PullOpts       *DockerPullOpts   `json:"pull_opts"`
 	WaitForRunning int64             `json:"wait_for_running"`
-	Networks       map[string]string `json:"networks"`
-	NetPasswd      string            `json:"netpasswd"`
+	Networks       []*subNetwork     `json:"networks"`
+	DNSName        string            `json:"dns_name"`
 }
 
 // DockerPingOpts describes the structure to ping docker containers in pikacloud API
@@ -104,19 +101,9 @@ type DockerPullOpts struct {
 // DockerPushOpts describes docker push options
 type DockerPushOpts DockerPullOpts
 
-func (e *ExternalAuthPullOpts) registryAuthString(aid string) string {
-	key := base64.StdEncoding.EncodeToString([]byte(aid))
-	k := fernet.MustDecodeKeys(key)
-	password := fernet.VerifyAndDecrypt([]byte(e.Password), 60*time.Second, k)
-	data := []byte(fmt.Sprintf("{\"username\": \"%s\", \"password\": \"%s\"}", e.Login, string(password)))
-	str := base64.StdEncoding.EncodeToString(data)
-	return str
-}
-
-func (agent *Agent) internalRegistryAuthString() string {
-	data := []byte(fmt.Sprintf("{\"username\": \"%s\", \"password\": \"%s\"}", agent.User.Email, apiToken))
-	str := base64.StdEncoding.EncodeToString(data)
-	return str
+type dockerInfo struct {
+	ServerVersion string `json:"server_version"`
+	KernelVersion string `json:"kernel_version"`
 }
 
 // DockerUnpauseOpts describes docker unpause options
@@ -137,9 +124,10 @@ type DockerStopOpts struct {
 
 // DockerStartOpts describes docker start options
 type DockerStartOpts struct {
-	ID             string            `json:"id"`
-	WaitForRunning int64             `json:"wait_for_running"`
-	Networks       map[string]string `json:"networks"`
+	ID             string        `json:"id"`
+	WaitForRunning int64         `json:"wait_for_running"`
+	Networks       []*subNetwork `json:"networks"`
+	DNSName        string        `json:"dns_name"`
 }
 
 // DockerRestartOpts describes docker restart options
@@ -200,7 +188,7 @@ type AgentContainer struct {
 	Container                string                    `json:"container"`
 	Config                   string                    `json:"config"`
 	AgentContainerStartRetry *AgentContainerStartRetry `json:"start_retry"`
-	Networks                 []string                  `json:"networks"`
+	Networks                 []*subNetwork             `json:"networks"`
 }
 
 type syncDockerContainersOptions struct {
@@ -212,15 +200,40 @@ type containerLog struct {
 	msg         []byte
 }
 
-// NewDockerClient creates a new docker client
-func NewDockerClient() *docker_client.Client {
+func searchDockerServerAPIVersion() (string, error) {
+	cmd := exec.Command("docker", "version", "-f", "{{.Server.APIVersion}}")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return string(out), err
+	}
+	toScan := bytes.NewReader(out)
+	scanner := bufio.NewScanner(toScan)
+	var serverVersion string
+	for scanner.Scan() {
+		serverVersion = scanner.Text()
+		break
+	}
+	return serverVersion, nil
+}
 
+// NewDockerClient creates a new docker client
+func NewDockerClient(dockerServerAPIVersion string) *docker_client.Client {
+	if dockerServerAPIVersion != "" {
+		os.Setenv("DOCKER_API_VERSION", dockerServerAPIVersion)
+	}
 	dockerClient, err := docker_client.NewEnvClient()
 	if err != nil {
 		logger.Fatal(err)
 	}
 	_, err = dockerClient.ServerVersion(context.Background())
 	if err != nil {
+		if dockerServerAPIVersion == "" {
+			versionServer, err := searchDockerServerAPIVersion()
+			if err != nil || versionServer == "" {
+				logger.Fatal(err, versionServer)
+			}
+			return NewDockerClient(versionServer)
+		}
 		logger.Fatal(err)
 	}
 	return dockerClient
@@ -254,22 +267,19 @@ func (agent *Agent) trackedContainer(containerID string) (*AgentContainer, error
 		return nil, fmt.Errorf("Cannot decode %v", inspect)
 	}
 
-	var nets []string
-	if networks[c.ID] == nil {
-		nets = make([]string, 0)
-	} else {
-		nets = networks[c.ID]
+	networks, err := agent.readContainerNetworkInfo(containerID)
+	if err != nil {
+		return nil, err
 	}
-
 	ac := &AgentContainer{
 		ID:        c.ID,
 		Container: string(data),
 		Config:    string(inspectConfig),
-		Networks:  nets,
+		Networks:  networks,
 	}
 	lock.Lock()
 	if trackedContainers[containerID] == nil {
-		ac.AgentContainerStartRetry = &AgentContainerStartRetry{LastError: "caca"}
+		ac.AgentContainerStartRetry = &AgentContainerStartRetry{LastError: ""}
 	} else {
 		ac.AgentContainerStartRetry = trackedContainers[containerID].AgentContainerStartRetry
 	}
@@ -279,13 +289,9 @@ func (agent *Agent) trackedContainer(containerID string) (*AgentContainer, error
 
 func (agent *Agent) initTrackedContainers() error {
 	trackedContainers = make(map[string]*AgentContainer)
-	containers, err := agent.DockerClient.ContainerList(
-		context.Background(),
-		docker_types.ContainerListOptions{
-			All: true,
-		})
+	containers, err := agent.managedContainers()
 	if err != nil {
-		return err
+		return nil
 	}
 	for _, container := range containers {
 		trackedContainer, err := agent.trackedContainer(container.ID)
@@ -393,8 +399,6 @@ func (agent *Agent) dockerCreate(opts *DockerCreateOpts) (*docker_types_containe
 		config.Cmd = s
 	}
 	natPortmap := docker_nat.PortMap{}
-	DNS := []string{"172.17.0.1", "8.8.8.8"}
-	DNSSearch := []string{"pikacloud.local"}
 	for _, p := range opts.Ports {
 		containerPortProto := docker_nat.Port(fmt.Sprintf("%d/%s", p.ContainerPort, p.Protocol))
 		dockerHostConfig := docker_nat.PortBinding{
@@ -407,8 +411,16 @@ func (agent *Agent) dockerCreate(opts *DockerCreateOpts) (*docker_types_containe
 		Binds:           opts.Binds,
 		PublishAllPorts: opts.PublishAll,
 		PortBindings:    natPortmap,
-		DNS:             DNS,
-		DNSSearch:       DNSSearch,
+	}
+	// must come from the supernetwork
+	if opts.Networks != nil {
+		dns, err := agent.weave.ContainerDNS()
+		if err != nil {
+			return nil, fmt.Errorf("Unable to retrieve DNS inventory IP: %s", err)
+		}
+		hostConfig.DNS = []string{dns}
+		hostConfig.DNSSearch = []string{agent.superNetwork.config.DNSDomain}
+
 	}
 	networkingConfig := &docker_types_network.NetworkingConfig{}
 	container, err := agent.DockerClient.ContainerCreate(ctx, config, hostConfig, networkingConfig, opts.Name)
@@ -419,7 +431,7 @@ func (agent *Agent) dockerCreate(opts *DockerCreateOpts) (*docker_types_containe
 	return &container, nil
 }
 
-func (agent *Agent) dockerStart(containerID string, waitForRunning int64, Networks map[string]string) error {
+func (agent *Agent) dockerStart(containerID string, waitForRunning int64, networks []*subNetwork, dnsName string) error {
 	ctx := context.Background()
 	startOpts := docker_types.ContainerStartOptions{}
 	if err := agent.DockerClient.ContainerStart(ctx, containerID, startOpts); err != nil {
@@ -431,28 +443,17 @@ func (agent *Agent) dockerStart(containerID string, waitForRunning int64, Networ
 		}
 		return err
 	}
-	logger.Infof("New container started %s", containerID)
-	if len(Networks) > 0 {
-		containers, err := agent.DockerClient.ContainerList(ctx, docker_types.ContainerListOptions{All: true})
-		if err != nil {
-			return err
-		}
-		Name := ""
-		for _, container := range containers {
-			if container.ID == containerID {
-				temp := strings.Split(container.Names[0], "_")[0]
-				Name = strings.Split(temp, "/")[1]
-			}
-		}
-		if err := agent.attachNetwork(containerID, Networks, Name); err != nil {
-			return err
-		}
-		var tnets []string
-		for net, domain := range Networks {
-			newnet := fmt.Sprintf("%s-%s", net, domain)
-			tnets = append(tnets, newnet)
-		}
-		networks[containerID] = tnets
+	time.Sleep(100 * time.Millisecond)
+	i, err := agent.DockerClient.ContainerInspect(context.Background(), containerID)
+	if err != nil {
+		return fmt.Errorf("Error inspect newly create container %s: %+v", containerID, err)
+	}
+	if !i.State.Running {
+		return fmt.Errorf("Container %s crashed just after start", containerID)
+	}
+	_, errAttach := agent.attachNetworks(containerID, networks, dnsName)
+	if errAttach != nil {
+		return errAttach
 	}
 	if waitForRunning > 0 {
 		logger.Debugf("Wait %d seconds for container %s to start", waitForRunning, containerID)
@@ -501,18 +502,10 @@ func (agent *Agent) dockerPause(containerID string) error {
 
 func (agent *Agent) dockerStop(containerID string, timeout time.Duration) error {
 	ctx := context.Background()
-	if len(networks) > 0 {
-		var nets map[string]string
-		nets = make(map[string]string)
-		for _, net := range networks[containerID] {
-			temp := strings.Split(net, "-")
-			nets[temp[0]] = temp[1]
-		}
-		if err := agent.detachNetwork(containerID, nets); err != nil {
-			return err
-		}
-		delete(networks, containerID)
+	if err := agent.detachNetworks(containerID, nil); err != nil {
+		return err
 	}
+
 	if err := agent.DockerClient.ContainerStop(ctx, containerID, &timeout); err != nil {
 		return err
 	}
@@ -526,29 +519,6 @@ func (agent *Agent) dockerRestart(containerID string, timeout time.Duration) err
 		return err
 	}
 	logger.Infof("Container %s restarted", containerID)
-	if len(networks[containerID]) > 0 {
-		containers, err := agent.DockerClient.ContainerList(ctx, docker_types.ContainerListOptions{All: true})
-		if err != nil {
-			return err
-		}
-		Name := ""
-		for _, container := range containers {
-			if container.ID == containerID {
-				temp := strings.Split(container.Names[0], "_")[0]
-				Name = strings.Split(temp, "/")[1]
-			}
-		}
-		var nets map[string]string
-		nets = make(map[string]string)
-		for _, net := range networks[containerID] {
-			temp := strings.Split(net, "-")
-			nets[temp[0]] = temp[1]
-		}
-
-		if err := agent.attachNetwork(containerID, nets, Name); err != nil {
-			return err
-		}
-	}
 	return nil
 }
 
@@ -570,21 +540,10 @@ func (agent *Agent) dockerRemove(containerID string, opts *DockerRemoveOpts) err
 		RemoveLinks:   opts.RemoveLinks,
 	}
 	ctx := context.Background()
-	if len(networks) > 0 {
-		var nets map[string]string
-		nets = make(map[string]string)
-		for _, net := range networks[containerID] {
-			temp := strings.Split(net, "-")
-			nets[temp[0]] = temp[1]
-		}
-		if err := agent.detachNetwork(containerID, nets); err != nil {
-			return err
-		}
-		delete(networks, containerID)
-	}
 	if err := agent.DockerClient.ContainerRemove(ctx, containerID, removeOpts); err != nil {
 		return err
 	}
+	deletetrackedContainer(containerID)
 	logger.Infof("Container %s remove", containerID)
 	return nil
 }
@@ -617,12 +576,6 @@ func TrimBuildFilesFromExcludes(excludes []string, dockerfile string, dockerfile
 		excludes = append(excludes, "!"+dockerfile)
 	}
 	return excludes
-}
-
-// IDPair is a UID and GID pair
-type IDPair struct {
-	UID int
-	GID int
 }
 
 func (step *TaskStep) dockerBuild(opts *DockerBuildOpts) error {
@@ -729,81 +682,15 @@ func (agent *Agent) dockerTerminal(opts *DockerTerminalOpts) error {
 		Env:          []string{"TERM=xterm"},
 		Cmd:          []string{"bash"},
 	}
-	// ctxWithTimeout, ctxCancel := context.WithTimeout(context.Background(), 10*time.Second)
-	// defer ctxCancel()
 	execCreateResponse, err := agent.DockerClient.ContainerExecCreate(ctx, opts.Cid, configExec)
 	if err != nil {
 		return fmt.Errorf("Cannot create container %s exec %+v: %s", opts.Cid, configExec, err)
 	}
-	// configStart := docker_types.ExecStartCheck{
-	// 	Detach: configExec.Detach,
-	// 	Tty:    configExec.Tty,
-	// }
-
-	// go func() error {
-	// 	errStart := agent.DockerClient.ContainerExecStart(ctxWithTimeout, execCreateResponse.ID, configStart)
-	// 	if errStart != nil {
-	// 		return errStart
-	// 	}
-	// 	return nil
-	// }()
 
 	execAttachResponse, errAttach := agent.DockerClient.ContainerExecAttach(ctx, execCreateResponse.ID, configExec)
 	if errAttach != nil {
 		return errAttach
 	}
-
-	// stdIn, stdOut, _ := term.StdStreams()
-	// stdInFD, _ := term.GetFdInfo(stdIn)
-	// stdOutFD, _ := term.GetFdInfo(stdOut)
-	//
-	// oldInState, _ := term.SetRawTerminal(stdInFD)
-	// oldOutState, _ := term.SetRawTerminalOutput(stdOutFD)
-	//
-	// defer term.RestoreTerminal(stdInFD, oldInState)
-	// defer term.RestoreTerminal(stdOutFD, oldOutState)
-
-	// var stdin io.Writer
-	// r, w := io.Pipe()
-	// defer w.Close()
-	// var stdout io.Writer
-	// var stderr io.Writer
-
-	// var buff bytes.Buffer
-	// // if stderr == nil {
-	// // 	stderr = &buff
-	// // }
-	// go func() error {
-	// 	if err := execPipe(execAttachResponse, nil, w, w); err != nil {
-	// 		return err
-	// 	}
-	// go func() error {
-	// 	for {
-	//
-	// 		fmt.Println(data)
-	// 	}
-	// }()
-	// 	data, err := agent.DockerClient.ContainerExecInspect(ctx, execCreateResponse.ID)
-	// 	if err != nil {
-	// 		return err
-	// 	}
-	// 	if data.ExitCode != 0 {
-	// 		// if so use the buffer that may have been assigned to the
-	// 		// streams to give message better error handling
-	// 		return fmt.Errorf("bad exit code(%d): %s", data.ExitCode, buff.String())
-	// 	}
-	// 	return nil
-	// }()
-	//
-	// fmt.Println("no wait")
-	// // cmd := exec.Command("docker", "exec", "-it", opts.ID, "bash")
-	// // // cmd := exec.Command("htop")
-	// // cmd.Env = append(os.Environ(), "TERM=xterm")
-	// // tty, err := pty.Start(cmd)
-	// // if err != nil {
-	// // 	c.WriteMessage(websocket.TextMessage, []byte(err.Error()))
-	// // 	return fmt.Errorf("Unable to start pty/cmd %+v", err)
-	// // }
 	runningTerminalsList[opts] = true
 	defer func() {
 		logger.Info("Defer fx terminal")
@@ -814,14 +701,6 @@ func (agent *Agent) dockerTerminal(opts *DockerTerminalOpts) error {
 		data, errInspect := agent.DockerClient.ContainerExecInspect(ctx, execCreateResponse.ID)
 		if errInspect == nil {
 			if data.Running {
-				// configKillExec := docker_types.ExecConfig{
-				// 	Tty:          false,
-				// 	AttachStdin:  false,
-				// 	AttachStderr: false,
-				// 	AttachStdout: false,
-				// 	Detach:       false,
-				// 	Env:          []string{"TERM=xterm"},
-				// }
 				if strings.HasSuffix(runtime.GOOS, "darwin") || isXhyve {
 					// https://www.reddit.com/r/docker/comments/6d8yt3/killing_a_process_from_docker_exec_on_os_x/
 					// https://gist.github.com/bschwind/7ef38e2918c43bd7ee23d86dad86db7d
@@ -844,34 +723,9 @@ func (agent *Agent) dockerTerminal(opts *DockerTerminalOpts) error {
 					} else {
 						logger.Infof("Leaked PID %d killed locally", data.Pid)
 					}
-					// configKillExec.Cmd = []string{"kill", "-9", fmt.Sprintf("%d", data.Pid)}
-					// killCreateResponse, errKillCreate := agent.DockerClient.ContainerExecCreate(ctx, opts.ID, configKillExec)
-					// if err == errKillCreate {
-					// 	killStartResponse, errKillStart := agent.DockerClient.ContainerExecAttach(ctx, killCreateResponse.ID, configKillExec)
-					// 	defer killStartResponse.Close()
-					// 	if errKillStart == nil {
-					// 		dataKill, errKillInspect := agent.DockerClient.ContainerExecInspect(ctx, execCreateResponse.ID)
-					// 		if errKillInspect != nil {
-					// 			logger.Infof("Cannot kill leaked process %d", data.Pid)
-					// 		} else {
-					// 			if dataKill.ExitCode == 0 {
-					// 				logger.Infof("Successfully killed leaked process %d", data.Pid)
-					// 			} else {
-					// 				logger.Infof("Cannot kill leaked process: 'kill -9 %d' exit code is %d'", data.Pid, dataKill.ExitCode)
-					// 			}
-					// 		}
-					// 	}
-					//}
 				}
 			}
 		}
-
-		// logger.Infof("Garbage collecting Terminal %s", opts.Task.ID)
-		// cmd.Process.Kill()
-		// cmd.Process.Wait()
-		// logger.Infof("Terminal command killed %s", opts.Task.ID)
-		// tty.Close()
-		// logger.Infof("TTY closed %s", opts.Task.ID)
 		execAttachResponse.Close()
 		logger.Infof("Exec session %s closed", execCreateResponse.ID)
 		c.Close()
@@ -880,8 +734,6 @@ func (agent *Agent) dockerTerminal(opts *DockerTerminalOpts) error {
 		return
 
 	}()
-	// quit := false
-	//go io.Copy(execAttachResponse.Conn, execAttachResponse.Conn.)
 	go func() {
 		defer func() {
 			quit = true
@@ -936,29 +788,9 @@ func (agent *Agent) dockerTerminal(opts *DockerTerminalOpts) error {
 				if err != nil {
 					logger.Infof("Unable to resize terminal %+v", errResize)
 				}
-				// _, _, errno := syscall.Syscall(
-				// 	syscall.SYS_IOCTL,
-				// 	// tty.Fd(),
-				// 	syscall.TIOCSWINSZ,
-				// 	uintptr(unsafe.Pointer(&resizeMessage)),
-				// )
-				// if errno != 0 {
-				// 	logger.Infof("Unable to resize terminal %+v", errno)
-				// }
 			default:
 				logger.Infof("Unknown data type %+v", dataTypeBuf)
 			}
-			// if err != nil {
-			// 	logger.Info("Error reading message from WS", err)
-			// 	return
-			// }
-			//
-			// _, err = execAttachResponse.Conn.Write(message)
-			// if err != nil {
-			// 	logger.Info("Error writing message to container", err)
-			// 	return
-			// }
-
 		}
 	}()
 	go func() {
@@ -992,168 +824,6 @@ func (agent *Agent) dockerTerminal(opts *DockerTerminalOpts) error {
 		}
 		time.Sleep(1 * time.Second)
 	}
-	// wr := WSReaderWriter{c}
-	// io.Copy(wr)
-	// // go func() {
-	// for {
-	// 	if quit {
-	// 		return nil
-	// 	}
-	//
-	// 	// fmt.Println(stdout)
-	// 	buf := new(bytes.Buffer)
-	// 	buf.ReadFrom(r)
-	// 	s := buf.String()
-	// 	if s != "" {
-	// 		fmt.Println("----", s)
-	// 	}
-	// 	// buf := make([]byte, 1024)
-	// 	// // io.Copy(os.Stdout, r)
-	// 	// read, _ := r.Read(buf)
-	// 	// fmt.Println(buf, read)
-	// 	// if err != nil {
-	// 	// 	c.WriteMessage(websocket.TextMessage, []byte(err.Error()))
-	// 	// 	quit = true
-	// 	// 	fmt.Printf("Unable to read from pty/cmd")
-	// 	// 	return
-	// 	// }
-	// 	// c.WriteMessage(websocket.BinaryMessage, []byte(buf[:read]))
-	// 	// c.WriteMessage(websocket.BinaryMessage, []byte(stdout))
-	//
-	// }
-	// }()
-
-	// for {
-	// 	if quit {
-	// 		return nil
-	// 	}
-	// 	// q := <-quit
-	// 	// fmt.Println("pass")
-	// 	// if q {
-	// 	// 	fmt.Println("Got quit in channel from tty reader goroutine")
-	// 	// 	return nil
-	// 	// }
-	// 	messageType, reader, err := c.NextReader()
-	// 	if err != nil {
-	// 		logger.Info("Unable to grab next reader")
-	// 		quit = true
-	// 		logger.Info("Sending true in quit")
-	// 		return nil
-	// 	}
-	//
-	// 	if messageType == websocket.TextMessage {
-	// 		logger.Info("Unexpected text message")
-	// 		c.WriteMessage(websocket.TextMessage, []byte("Unexpected text message"))
-	// 		quit = true
-	// 		continue
-	// 	}
-	// 	dataTypeBuf := make([]byte, 1)
-	// 	read, err := reader.Read(dataTypeBuf)
-	// 	if err != nil {
-	// 		logger.Infof("Unable to read message type from reader %+v", err)
-	// 		c.WriteMessage(websocket.TextMessage, []byte("Unable to read message type from reader"))
-	// 		quit = true
-	// 		return nil
-	// 	}
-	//
-	// 	if read != 1 {
-	// 		logger.Infof("Unexpected number of bytes read %+v", read)
-	// 		quit = true
-	// 		return nil
-	// 	}
-	//
-	// 	switch dataTypeBuf[0] {
-	// 	case 0:
-	// 		copied, err := io.Copy(tty, reader)
-	// 		if err != nil {
-	// 			logger.Infof("Error after copying %d bytes %+v", copied, err)
-	// 		}
-	// 	case 1:
-	// 		decoder := json.NewDecoder(reader)
-	// 		resizeMessage := windowSize{}
-	// 		err := decoder.Decode(&resizeMessage)
-	// 		if err != nil {
-	// 			c.WriteMessage(websocket.TextMessage, []byte("Error decoding resize message: "+err.Error()))
-	// 			continue
-	// 		}
-	// 		logger.Infof("Resizing terminal %+v", resizeMessage)
-	// 		_, _, errno := syscall.Syscall(
-	// 			syscall.SYS_IOCTL,
-	// 			tty.Fd(),
-	// 			syscall.TIOCSWINSZ,
-	// 			uintptr(unsafe.Pointer(&resizeMessage)),
-	// 		)
-	// 		if errno != 0 {
-	// 			logger.Infof("Unable to resize terminal %+v", errno)
-	// 		}
-	// 	default:
-	// 		logger.Infof("Unknown data type %+v", dataTypeBuf)
-	// 	}
-	// }
-	// // for {
-	// 	buf := make([]byte, 1024)
-	// 	read, _ := tty.Read(buf)
-	// 	if err != nil {
-	// 		c.WriteMessage(websocket.TextMessage, []byte(err.Error()))
-	// 		fmt.Printf("Unable to read from pty/cmd")
-	// 		return nil
-	// 	}
-	// 	c.WriteMessage(websocket.BinaryMessage, []byte(buf[:read]))
-	// }
-
-	// }()
-	// ping terminal endpoint
-	//
-	// for {
-	//
-	// 	time.Sleep(3 * time.Second)
-	// }
-	// ctx := context.Background()
-	// if err := agent.DockerClient.ContainerRestart(ctx, containerID, &timeout); err != nil {
-	// 	return err
-	// }
-	// logger.Infof("Container %s restarted", containerID)
-	// return nil
-	// return nil
-}
-
-func (agent *Agent) infiniteSyncDockerInfo() {
-	dockerInfoState := docker_types.Info{}
-	for {
-		info, err := agent.DockerClient.Info(context.Background())
-		if err != nil {
-			time.Sleep(3 * time.Second)
-			continue
-		}
-		// compare
-		dockerInfoState.SystemTime = ""
-		info.SystemTime = ""
-		if !reflect.DeepEqual(dockerInfoState, info) {
-			err := agent.syncDockerInfo(info)
-			if err != nil {
-				logger.Infof("Cannot sync docker info: %+v", err)
-			} else {
-				dockerInfoState = info
-				logger.Debug("Sync docker info OK")
-			}
-		}
-		time.Sleep(3 * time.Second)
-	}
-}
-
-func (agent *Agent) syncDockerInfo(info docker_types.Info) error {
-	uri := fmt.Sprintf("run/agents/%s/docker/info/", agent.ID)
-	pingInfo := AgentDockerInfo{
-		Info: info,
-	}
-	status, err := pikacloudClient.Put(uri, pingInfo, nil)
-	if err != nil {
-		return err
-	}
-	if status != 200 {
-		return fmt.Errorf("Failed to push docker info: %d", status)
-	}
-	return nil
 }
 
 func (agent *Agent) trackedDockerContainersSyncer() {
@@ -1168,46 +838,69 @@ func (agent *Agent) trackedDockerContainersSyncer() {
 		case containerID := <-agent.chRegisterContainer:
 			trackedContainer, err := agent.trackedContainer(containerID)
 			if err != nil {
-				logger.Errorf("Cannot generate trackerContainer: %+v", err)
+				// logger.Debugf("Cannot generate trackedContainer for register: %+v", err)
 				continue
 			}
-			lock.Lock()
-			trackedContainers[containerID] = trackedContainer
-			lock.Unlock()
-			errSync := agent.syncDockerContainers([]*AgentContainer{trackedContainer})
-			if errSync != nil {
-				logger.Errorf("Cannot sync container %s: %+v", containerID, errSync)
-				agent.forceSyncTrackedDockerContainers()
+			isManaged, err := agent.isManagedContainer(containerID)
+			if err != nil {
 				continue
 			}
-			logger.WithFields(logrus.Fields{"cid": containerID}).Debug("Container synced")
+			if isManaged {
+				lock.Lock()
+				trackedContainers[containerID] = trackedContainer
+				lock.Unlock()
+				errSync := agent.syncDockerContainers([]*AgentContainer{trackedContainer})
+				if errSync != nil {
+					logger.Errorf("Cannot sync container %s: %+v", containerID, errSync)
+					agent.forceSyncTrackedDockerContainers()
+					continue
+				}
+				logger.WithFields(logrus.Fields{"cid": containerID}).Debug("Container synced")
+			}
 		case containerID := <-agent.chDeregisterContainer:
-			lock.Lock()
-			delete(trackedContainers, containerID)
-			lock.Unlock()
-			err := agent.unsyncDockerContainer(containerID)
-			if err != nil {
-				logger.Errorf("Cannot unsync container %s: %+v", containerID, err)
-				agent.forceSyncTrackedDockerContainers()
-				continue
-			}
-			logger.WithFields(logrus.Fields{"cid": containerID}).Debug("Container unsynced")
+			deletetrackedContainer(containerID)
 		case containerID := <-agent.chSyncContainer:
-			trackedContainer, err := agent.trackedContainer(containerID)
-			if err != nil {
-				logger.Errorf("Cannot generate trackerContainer: %+v", err)
-				continue
-			}
-			trackedContainers[containerID] = trackedContainer
-			errSync := agent.syncDockerContainers([]*AgentContainer{trackedContainer})
-			if errSync != nil {
-				logger.Errorf("Cannot sync container %s: %+v", containerID, errSync)
-				agent.forceSyncTrackedDockerContainers()
-				continue
-			}
-			logger.WithFields(logrus.Fields{"cid": containerID}).Debug("Container synced (update)")
+			agent.syncDockerContainer(containerID)
 		}
 	}
+}
+
+func (agent *Agent) syncDockerContainer(containerID string) error {
+	trackedContainer, err := agent.trackedContainer(containerID)
+	if err != nil {
+		return err
+	}
+	isManaged, err := agent.isManagedContainer(containerID)
+	if err != nil {
+		return err
+	}
+	if isManaged {
+		trackedContainers[containerID] = trackedContainer
+		errSync := agent.syncDockerContainers([]*AgentContainer{trackedContainer})
+		if errSync != nil {
+			logger.Errorf("Cannot sync container %s: %+v", containerID, errSync)
+			agent.forceSyncTrackedDockerContainers()
+			return nil
+		}
+		logger.WithFields(logrus.Fields{"cid": containerID}).Debug("Container synced (update)")
+	}
+	return nil
+}
+
+func deletetrackedContainer(containerID string) error {
+	lock.Lock()
+	if trackedContainers[containerID] != nil {
+		delete(trackedContainers, containerID)
+		err := agent.unsyncDockerContainer(containerID)
+		if err != nil {
+			logger.Debugf("Cannot unsync container %s: %+v", containerID, err)
+			agent.forceSyncTrackedDockerContainers()
+			return nil
+		}
+		logger.WithFields(logrus.Fields{"cid": containerID}).Debug("Container unsynced")
+	}
+	lock.Unlock()
+	return nil
 }
 
 func (agent *Agent) forceSyncTrackedDockerContainers() error {
@@ -1234,32 +927,6 @@ func (agent *Agent) syncDockerContainers(containers []*AgentContainer) error {
 	return nil
 }
 
-// containersSyncList := []*AgentContainer{}
-// for _, container := range trackedContainers {
-// 	if len(containersID) > 0 {
-// 		if containersID[container.ID] {
-// 			containersSyncList = append(containersSyncList, container)
-// 		}
-// 	} else {
-// 		containersSyncList = append(containersSyncList, container)
-// 	}
-// }
-// if len(containersSyncList) > 0 {
-// 	uri := fmt.Sprintf("run/agents/%s/docker/containers/", agent.ID)
-// 	status, err := agent.Client.Post(uri, containersSyncList, nil)
-// 	if err != nil {
-// 		return err
-// 	}
-// 	if status != 200 {
-// 		return fmt.Errorf("Failed to sync docker containers: %d", status)
-// 	}
-// 	logger.Infof("Sync docker %d containers of %d OK", len(containersSyncList), len(trackedContainers))
-// }
-//
-// return nil
-
-// }
-
 func (agent *Agent) unsyncDockerContainer(containerID string) error {
 	deleteContainerURI := fmt.Sprintf("run/agents/%s/docker/containers/%s/", agent.ID, containerID)
 	_, err := pikacloudClient.Delete(deleteContainerURI, nil, nil)
@@ -1277,7 +944,7 @@ func (agent *Agent) isManagedContainer(containerID string) (bool, error) {
 	expectedLabel := "pikacloud.container.id"
 	containerConfigID := container.Config.Labels[expectedLabel]
 	if containerConfigID == "" {
-		return false, fmt.Errorf("No label pikacloud.container.id")
+		return false, nil
 	}
 	return true, nil
 }
@@ -1416,11 +1083,6 @@ func (agent *Agent) listenDockerEvents() error {
 	}
 }
 
-// Run docker container
-func (agent *Agent) Run() {
-
-}
-
 // Docker runs a docker step
 func (step *TaskStep) Docker() error {
 	switch step.Method {
@@ -1449,7 +1111,7 @@ func (step *TaskStep) Docker() error {
 		if err != nil {
 			return err
 		}
-		if err := agent.dockerStart(containerCreated.ID, createOpts.WaitForRunning, createOpts.Networks); err != nil {
+		if err := agent.dockerStart(containerCreated.ID, createOpts.WaitForRunning, createOpts.Networks, createOpts.DNSName); err != nil {
 			return err
 		}
 
@@ -1525,7 +1187,7 @@ func (step *TaskStep) Docker() error {
 		if err != nil {
 			return fmt.Errorf("Bad config for docker start: %s (%v)", err, step.PluginConfig)
 		}
-		err = agent.dockerStart(startOpts.ID, startOpts.WaitForRunning, startOpts.Networks)
+		err = agent.dockerStart(startOpts.ID, startOpts.WaitForRunning, startOpts.Networks, startOpts.DNSName)
 		if err != nil {
 			return err
 		}
@@ -1534,7 +1196,7 @@ func (step *TaskStep) Docker() error {
 		var stopOpts = DockerStopOpts{}
 		err := json.Unmarshal([]byte(step.PluginConfig), &stopOpts)
 		if err != nil {
-			return fmt.Errorf("Bad config for docker unpause: %s (%v)", err, step.PluginConfig)
+			return fmt.Errorf("Bad config for docker stop: %s (%v)", err, step.PluginConfig)
 		}
 		err = agent.dockerStop(stopOpts.ID, 10*time.Second)
 		if err != nil {
