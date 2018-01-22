@@ -78,7 +78,6 @@
   name = "github.com/Azure/go-ansiterm"
 	source = "https://github.com/bjorand/go-ansiterm.git"
 
-
 [[constraint]]
   branch = "master"
   name = "github.com/docker/go-connections"

@@ -1,37 +1,10 @@
 package main
 
 import (
-	"encoding/base64"
 	"fmt"
 	"os/exec"
-	"reflect"
 	"testing"
-
-	fernet "github.com/fernet/fernet-go"
 )
-
-func TestRegistryAuthString(t *testing.T) {
-	aid := "9ee55b88a2a74a59adc48a8e425c61d7"
-	key := base64.StdEncoding.EncodeToString([]byte(aid))
-	k := fernet.MustDecodeKeys(key)
-	password, err := fernet.EncryptAndSign([]byte("bar"), k[0])
-	if err != nil {
-		t.Errorf("Cannot create test encrypted password: %v", err)
-	}
-	e := ExternalAuthPullOpts{
-		Login:    "foo",
-		Password: string(password),
-	}
-	encodedAuth := e.registryAuthString(aid)
-	plainAuth, err := base64.StdEncoding.DecodeString(encodedAuth)
-	if err != nil {
-		t.Errorf("Cannot decode base64 string %s", plainAuth)
-	}
-	want := "{\"username\": \"foo\", \"password\": \"bar\"}"
-	if !reflect.DeepEqual(string(plainAuth), want) {
-		t.Errorf("auth %s, want %v", plainAuth, want)
-	}
-}
 
 func TestDockerContainer(t *testing.T) {
 	opts := &DockerCreateOpts{
@@ -63,8 +36,7 @@ func TestDockerContainer(t *testing.T) {
 	if errRun != nil {
 		t.Errorf("Container is not created: %v", err)
 	}
-	var emptySlice map[string]string
-	errStart := agent.dockerStart(create.ID, 0, emptySlice)
+	errStart := agent.dockerStart(create.ID, 0, nil, "")
 	if errStart != nil {
 		t.Errorf("Cannot start container: %v", errStart)
 	}

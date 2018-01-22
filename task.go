@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"strings"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -100,6 +101,14 @@ func (task *Task) Do() error {
 		ackStep.StartTimestamp = time.Now().Unix()
 		step.Task = task
 		if step.AckBeforeCompletion && task.NeedACK {
+			ackStep.Success = true
+			if step.ResultMessage != "" {
+				ackStep.Message = step.ResultMessage
+
+			} else {
+				ackStep.Message = "OK"
+			}
+			ack.TaskACKStep = append(ack.TaskACKStep, &ackStep)
 			err := agent.ackTask(task, &ack)
 			if err != nil {
 				logger.Errorf("Unable to ack task %s before running step: %s", task.ID, err)
@@ -129,7 +138,6 @@ func (task *Task) Do() error {
 			} else {
 				ackStep.Message = "OK"
 			}
-
 		}
 		ackStep.EndTimestamp = time.Now().Unix()
 		ack.TaskACKStep = append(ack.TaskACKStep, &ackStep)
@@ -143,4 +151,57 @@ func (task *Task) Do() error {
 		}
 	}
 	return nil
+}
+
+func (agent *Agent) pullTasks() ([]*Task, error) {
+	tasksURI := fmt.Sprintf("run/agents/%s/tasks/ready/?requeue=false&size=50", agent.ID)
+	tasks := []*Task{}
+	err := pikacloudClient.Get(tasksURI, &tasks)
+	if err != nil {
+		return nil, err
+	}
+	return tasks, nil
+}
+
+func (agent *Agent) ackTask(task *Task, taskACK *TaskACK) error {
+	ackURI := fmt.Sprintf("run/agents/%s/tasks/unack/%s/", agent.ID, task.ID)
+	_, err := pikacloudClient.Delete(ackURI, &taskACK, nil)
+	if err != nil {
+		logger.Error(err)
+		return err
+	}
+	return nil
+}
+
+func (agent *Agent) infinitePullTasks() {
+	for {
+		tasks, err := agent.pullTasks()
+		if err != nil {
+			logger.Errorf("Cannot pull tasks: %+v", err)
+		}
+		if len(tasks) > 0 {
+			tasksID := []string{}
+			for _, t := range tasks {
+				tasksID = append(tasksID, t.ID)
+			}
+			logger.Infof("Got %d new tasks %s", len(tasks), strings.Join(tasksID, ", "))
+		}
+		for _, task := range tasks {
+			task.cancelCh = make(chan bool)
+			if task.NeedACK {
+				lock.RLock()
+				runningTasksList[task.ID] = task
+				lock.RUnlock()
+			}
+			go func(t *Task) {
+				logger.Infof("running task %s", t.ID)
+				err := t.Do()
+				if err != nil {
+					logger.Errorf("Unable to do task %s: %s", t.ID, err)
+				}
+				logger.Infof("task %s done!", t.ID)
+			}(task)
+		}
+		time.Sleep(3 * time.Second)
+	}
 }

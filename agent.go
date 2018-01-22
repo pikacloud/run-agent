@@ -1,41 +1,38 @@
 package main
 
 import (
-	"archive/tar"
-	"compress/gzip"
 	"context"
-	"encoding/hex"
 	"fmt"
-	"io"
 	"runtime"
 	"strings"
 	"time"
 
 	"github.com/Sirupsen/logrus"
-	update "github.com/inconshreveable/go-update"
 	docker_client "github.com/moby/moby/client"
 	"github.com/pikacloud/gopikacloud"
+	weave_plugin "github.com/pikacloud/run-agent/plugins/weave"
 )
 
 // CreateAgentOptions represents the agent Create() options
 type CreateAgentOptions struct {
-	Hostname   string              `json:"hostname"`
-	Labels     []string            `json:"labels,omitempty"`
-	Localtime  int                 `json:"localtime"`
-	Version    string              `json:"version"`
-	OS         string              `json:"os"`
-	Arch       string              `json:"arch"`
-	Interfaces []string            `json:"interfaces"`
-	Peers      map[string][]string `json:"peers"`
+	Hostname   string      `json:"hostname"`
+	Labels     []string    `json:"labels,omitempty"`
+	Localtime  int         `json:"localtime"`
+	Version    string      `json:"version"`
+	OS         string      `json:"os"`
+	Arch       string      `json:"arch"`
+	DockerInfo *dockerInfo `json:"docker_info"`
 }
 
 // PingAgentOptions represents the agent Ping() options
 type PingAgentOptions struct {
-	Metrics          *Metrics `json:"metrics,omitempty"`
-	RunningTasks     []string `json:"running_tasks,omitempty"`
-	RunningTerminals []string `json:"running_terminals,omitempty"`
-	Localtime        int      `json:"localtime"`
-	NumGoroutines    int      `json:"num_goroutines"`
+	Metrics          *Metrics                        `json:"metrics,omitempty"`
+	RunningTasks     []string                        `json:"running_tasks,omitempty"`
+	RunningTerminals []string                        `json:"running_terminals,omitempty"`
+	Localtime        int                             `json:"localtime"`
+	NumGoroutines    int                             `json:"num_goroutines"`
+	Interfaces       []string                        `json:"interfaces"`
+	Peers            map[string]*AgentPeerConnection `json:"peers"`
 }
 
 // Agent describes the agent
@@ -53,6 +50,11 @@ type Agent struct {
 	chSyncContainer       chan string
 	chSyncPeers           chan string
 	startNetworking       bool
+	superNetwork          *superNetwork
+	peers                 map[string]*AgentPeerConnection
+	interfaces            []string
+	weave                 *weave_plugin.Weave
+	PeerID                string `json:"peer_id"`
 }
 
 func localtime() int {
@@ -77,31 +79,37 @@ func makeLabels(labels string) []string {
 func NewAgent(hostname string, labels []string, startNetworking bool) *Agent {
 	return &Agent{
 		Hostname:              hostname,
-		DockerClient:          NewDockerClient(),
+		DockerClient:          NewDockerClient(""),
 		Labels:                labels,
 		chRegisterContainer:   make(chan string),
 		chDeregisterContainer: make(chan string),
 		chSyncContainer:       make(chan string),
 		chSyncPeers:           make(chan string),
 		startNetworking:       startNetworking,
+		peers:                 make(map[string]*AgentPeerConnection),
 	}
 }
 
 // Register an agent
 func (agent *Agent) Register() error {
 	opt := CreateAgentOptions{
-		Hostname:  agent.Hostname,
-		Localtime: localtime(),
-		Version:   version,
-		OS:        runtime.GOOS,
-		Arch:      runtime.GOARCH,
-		Peers:     make(map[string][]string),
+		Hostname:   agent.Hostname,
+		Localtime:  localtime(),
+		Version:    version,
+		OS:         runtime.GOOS,
+		Arch:       runtime.GOARCH,
+		DockerInfo: &dockerInfo{},
 	}
 	if len(agent.Labels) > 0 {
 		opt.Labels = agent.Labels
 	}
-	if len(interfaces) > 0 {
-		opt.Interfaces = interfaces
+
+	if agent.DockerClient != nil {
+		info, err := agent.DockerClient.Info(context.Background())
+		if err == nil {
+			opt.DockerInfo.KernelVersion = info.KernelVersion
+			opt.DockerInfo.ServerVersion = info.ServerVersion
+		}
 	}
 	status, err := pikacloudClient.Post("run/agents/", opt, &agent)
 	if err != nil {
@@ -111,10 +119,12 @@ func (agent *Agent) Register() error {
 		return fmt.Errorf("Failed to create agent http code: %d", status)
 	}
 	if agent.startNetworking {
-		err = agent.checkSuperNetwork()
+		logger.Debug("Checking network router...")
+		err := agent.handleSuperNetwork()
 		if err != nil {
-			return fmt.Errorf("Unable to check supernetworks: %+v", err)
+			return fmt.Errorf("Unable to check network router: %s", err)
 		}
+		logger.Debug("Network router is operational")
 	}
 	logger.Printf("Agent %s registered with hostname %s (agent version %s)\n", agent.ID, agent.Hostname, version)
 	return nil
@@ -144,13 +154,6 @@ func (agent *Agent) infinitePing() {
 					logger.Errorf("Unable to sync containers: %+v", errSync)
 					continue
 				}
-				info, err := agent.DockerClient.Info(context.Background())
-				if err != nil {
-					logger.Errorf("Cannot fetch docker info %+v", err)
-					continue
-				} else {
-					agent.syncDockerInfo(info)
-				}
 				streamer.destroy()
 				streamer = NewStreamer(fmt.Sprintf("aid:%s", agent.ID), true)
 				go streamer.run()
@@ -171,6 +174,8 @@ func (agent *Agent) Ping() error {
 		RunningTasks:  flatRunningTasksList,
 		Localtime:     localtime(),
 		NumGoroutines: runtime.NumGoroutine(),
+		Interfaces:    agent.interfaces,
+		Peers:         agent.peers,
 	}
 	for t := range runningTerminalsList {
 		opts.RunningTerminals = append(opts.RunningTerminals, t.Tid)
@@ -190,152 +195,5 @@ func (agent *Agent) Ping() error {
 		"containerLogs": fmt.Sprintf("%d/1024", len(streamer.msg)),
 		"containers":    len(trackedContainers),
 	}).Debug("Ping OK")
-	return nil
-}
-
-func (agent *Agent) ackTask(task *Task, taskACK *TaskACK) error {
-	ackURI := fmt.Sprintf("run/agents/%s/tasks/unack/%s/", agent.ID, task.ID)
-	_, err := pikacloudClient.Delete(ackURI, &taskACK, nil)
-	if err != nil {
-		logger.Error(err)
-		return err
-	}
-	return nil
-}
-
-func (agent *Agent) infinitePullTasks() {
-	for {
-		tasks, err := agent.pullTasks()
-		if err != nil {
-			logger.Errorf("Cannot pull tasks: %+v", err)
-		}
-		if len(tasks) > 0 {
-			tasksID := []string{}
-			for _, t := range tasks {
-				tasksID = append(tasksID, t.ID)
-			}
-			logger.Infof("Got %d new tasks %s", len(tasks), strings.Join(tasksID, ", "))
-		}
-		for _, task := range tasks {
-			task.cancelCh = make(chan bool)
-			if task.NeedACK {
-				lock.RLock()
-				runningTasksList[task.ID] = task
-				lock.RUnlock()
-			}
-			go func(t *Task) {
-				logger.Infof("running task %s", t.ID)
-				err := t.Do()
-				if err != nil {
-					logger.Errorf("Unable to do task %s: %s", t.ID, err)
-				}
-				logger.Infof("task %s done!", t.ID)
-			}(task)
-		}
-		time.Sleep(3 * time.Second)
-	}
-}
-
-func (agent *Agent) pullTasks() ([]*Task, error) {
-	tasksURI := fmt.Sprintf("run/agents/%s/tasks/ready/?requeue=false&size=50", agent.ID)
-	tasks := []*Task{}
-	err := pikacloudClient.Get(tasksURI, &tasks)
-	if err != nil {
-		return nil, err
-	}
-	return tasks, nil
-}
-
-type versionUpdate struct {
-	Version         string `json:"version"`
-	Os              string `json:"os"`
-	Arch            string `json:"arch"`
-	ArchiveURL      string `json:"archive_url"`
-	ArchiveChecksum string `json:"archive_checksum"`
-	BinaryChecksum  string `json:"binary_checksum"`
-	BinarySignature string `json:"binary_signature"`
-}
-
-func (agent *Agent) getLatestVersion() (*versionUpdate, error) {
-	versionURI := fmt.Sprintf("run/agent-version/latest/?os=%s&arch=%s", runtime.GOOS, runtime.GOARCH)
-	v := &versionUpdate{}
-	err := pikacloudClient.Get(versionURI, &v)
-	if err != nil {
-		return nil, err
-	}
-	return v, nil
-}
-
-func (agent *Agent) update() error {
-	v, err := agent.getLatestVersion()
-	if err != nil {
-		return err
-	}
-	if v.Version == version {
-		logger.Infof("Agent version %s is up to date.", version)
-		return nil
-	}
-	logger.Infof("Preparing update from %s to %s", version, v.Version)
-	checksum, err := hex.DecodeString(v.BinaryChecksum)
-	if err != nil {
-		return err
-	}
-	signature, err := hex.DecodeString(v.BinarySignature)
-	if err != nil {
-		return err
-	}
-	logger.Infof("Downloading %s", v.ArchiveURL)
-	response, err := httpClient.Get(v.ArchiveURL)
-	if err != nil {
-		return err
-	}
-	defer response.Body.Close()
-	logger.Infof("Uncompressing run-agent %v update", v.Version)
-	gzReader, err := gzip.NewReader(response.Body)
-	if err != nil {
-		return err
-	}
-	binaryReader, binaryWriter := io.Pipe()
-	defer binaryReader.Close()
-	defer binaryWriter.Close()
-	tarReader := tar.NewReader(gzReader)
-	for {
-		header, errTarReader := tarReader.Next()
-		if errTarReader == io.EOF {
-			break
-		}
-		if errTarReader != nil {
-			return err
-		}
-		if header.Name == "run-agent" {
-			go func() {
-				if _, errIoTar := io.Copy(binaryWriter, tarReader); errIoTar != nil {
-					logger.Fatalf("ExtractTarGz: Copy() failed: %s", errIoTar.Error())
-				}
-				defer binaryWriter.Close()
-			}()
-			break
-		}
-	}
-	logger.Infof("Applying update")
-	opts := update.Options{
-		Checksum:  checksum,
-		Signature: signature,
-	}
-	publicKey := `
------BEGIN PUBLIC KEY-----
-MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEA+UzJD+more/0adp0/IKYGl9OgO1
-A5t0SQ22qx1j3A6ozKZpNGTQ8JZCudWza3vuZ9RcjsBfbBZVmWZwqDMYbQ==
------END PUBLIC KEY-----`
-	err = opts.SetPublicKeyPEM([]byte(publicKey))
-	if err != nil {
-		return fmt.Errorf("Could not parse public key: %v", err)
-	}
-	errUpdate := update.Apply(binaryReader, opts)
-	if errUpdate != nil {
-		return errUpdate
-	}
-	logger.Infof("Update done from %s to version %s", version, v.Version)
-	shutdown(249)
 	return nil
 }
