@@ -395,6 +395,13 @@ func (step *TaskStep) Network() error {
 		step.ResultMessage = fmt.Sprintf("Container %s detached from network %s", detachOpts.ContainerID, detachOpts.Cidr)
 		agent.syncDockerContainer(detachOpts.ContainerID)
 		return nil
+	case "reset":
+		err := agent.weave.Destroy()
+		if err != nil {
+			return fmt.Errorf("Cannot reset network router: %s", err)
+		}
+		step.ResultMessage = fmt.Sprintf("Network router resetted")
+		return nil
 	default:
 		return fmt.Errorf("Unknown step method %s", step.Method)
 	}
