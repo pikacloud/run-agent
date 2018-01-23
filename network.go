@@ -227,7 +227,7 @@ func (agent *Agent) infiniteSyncNetworkRouterStatus() {
 	for {
 		if err := agent.syncNetworkRouterStatus(); err != nil {
 			logger.Debug(err)
-			if _, err := agent.weave.Auto(); err != nil {
+			if err := agent.handleSuperNetwork(); err != nil {
 				logger.Debug(err)
 			}
 		}
@@ -344,9 +344,19 @@ func (step *TaskStep) Network() error {
 		if err != nil {
 			return fmt.Errorf("Bad config for network connect: %s (%v)", err, step.PluginConfig)
 		}
+		atLeastOneReachable := false
+		for _, ip := range connectOpts.IPs {
+			if errTCP := agent.weave.TestTCPConnection(ip); errTCP == nil {
+				atLeastOneReachable = true
+				break
+			}
+		}
+		if !atLeastOneReachable {
+			return fmt.Errorf("No remote peers reachables in %s", strings.Join(connectOpts.IPs, ", "))
+		}
 		err = agent.connectPeers(connectOpts.IPs)
 		if err != nil {
-			return fmt.Errorf("Cannot connect to any peers: %s", err)
+			return fmt.Errorf("Failure attempting to add connections to network router: %s", err)
 		}
 		return nil
 	case "forget":

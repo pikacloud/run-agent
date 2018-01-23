@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"net"
 	"os"
 	"os/exec"
 	"strings"
@@ -157,6 +158,16 @@ func (w *Weave) Attach(cid string, network string) (string, error) {
 		return "", fmt.Errorf("%s %s", err, ip)
 	}
 	return string(ip), nil
+}
+
+// TestTCPConnection tries to connect to a remote weave router
+func (w *Weave) TestTCPConnection(ip string) error {
+	conn, err := net.Dial("tcp", fmt.Sprintf("%s:6783", ip))
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+	return nil
 }
 
 // Connect a peer to weave
