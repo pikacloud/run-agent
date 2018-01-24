@@ -1,15 +1,21 @@
 package main
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
+	"time"
+
+	fernet "github.com/fernet/fernet-go"
 
 	git "gopkg.in/src-d/go-git.v4"
 	"gopkg.in/src-d/go-git.v4/plumbing"
 
+	"golang.org/x/crypto/ssh"
 	"gopkg.in/src-d/go-git.v4/plumbing/transport"
+	ssh2 "gopkg.in/src-d/go-git.v4/plumbing/transport/ssh"
 
 	gitConfig "gopkg.in/src-d/go-git.v4/config"
 	gitClient "gopkg.in/src-d/go-git.v4/plumbing/transport/client"
@@ -22,6 +28,7 @@ type GitCloneOpts struct {
 	Path   string `json:"path"`
 	URL    string `json:"repository_url"`
 	GitRef string `json:"git_ref"`
+	SSHKey string `json:"sshkey"`
 }
 
 // Git handles git functions
@@ -37,9 +44,32 @@ func (step *TaskStep) Git() error {
 		if cloneOpts.GitRef == "" {
 			cloneOpts.GitRef = "master"
 		}
-		references, err := inMemorylsRemote(cloneOpts.URL, nil)
-		if err != nil {
-			return fmt.Errorf("Unable to list remote reference for %s: %+v", cloneOpts.URL, err)
+		// check if a ssh key is given
+		var auth *ssh2.PublicKeys
+		hasAuth := false
+		if cloneOpts.SSHKey != "" {
+			bytesKey := make([]byte, 32)
+			copy(bytesKey, []byte(agent.ID))
+			fKey := base64.StdEncoding.EncodeToString(bytesKey)
+			k := fernet.MustDecodeKeys(fKey)
+			sshkey := fernet.VerifyAndDecrypt([]byte(cloneOpts.SSHKey), 60*time.Second, k)
+			signer, _ := ssh.ParsePrivateKey([]byte(sshkey))
+			auth = &ssh2.PublicKeys{User: "git", Signer: signer}
+			hasAuth = true
+		}
+
+		references := make(memory.ReferenceStorage)
+		var err2 error
+		if hasAuth {
+			references, err2 = inMemorylsRemote(cloneOpts.URL, auth)
+			if err2 != nil {
+				return fmt.Errorf("Unable to list remote reference for %s: %+v", cloneOpts.URL, err)
+			}
+		} else {
+			references, err2 = inMemorylsRemote(cloneOpts.URL, nil)
+			if err2 != nil {
+				return fmt.Errorf("Unable to list remote reference for %s: %+v", cloneOpts.URL, err)
+			}
 		}
 		reference, err := resolveRawReference(cloneOpts.GitRef, references)
 		if err != nil {
@@ -50,10 +80,20 @@ func (step *TaskStep) Git() error {
 			return errMkdir
 		}
 		step.stream([]byte(fmt.Sprintf("\033[33m[GIT]\033[0m cloning %s, using %s %s\n", cloneOpts.URL, reference.Type(), reference.String())))
-		cloneOptions := &git.CloneOptions{
-			URL:           cloneOpts.URL,
-			Depth:         1,
-			ReferenceName: reference.Name(),
+		cloneOptions := &git.CloneOptions{}
+		if cloneOpts.SSHKey != "" {
+			cloneOptions = &git.CloneOptions{
+				URL:           cloneOpts.URL,
+				Depth:         1,
+				ReferenceName: reference.Name(),
+				Auth:          auth,
+			}
+		} else {
+			cloneOptions = &git.CloneOptions{
+				URL:           cloneOpts.URL,
+				Depth:         1,
+				ReferenceName: reference.Name(),
+			}
 		}
 		if step.Task.Stream {
 			cloneOptions.Progress = step.Task.streamer.ioWriter
@@ -99,7 +139,7 @@ func inMemorylsRemote(repoURL string, auth transport.AuthMethod) (memory.Referen
 	if err != nil {
 		return nil, err
 	}
-	remotes, err := lsRemote(remote, nil)
+	remotes, err := lsRemote(remote, auth)
 	if err != nil {
 		return nil, err
 	}
