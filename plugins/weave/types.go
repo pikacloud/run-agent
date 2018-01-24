@@ -1,6 +1,7 @@
 package weave
 
 import (
+	"net/http"
 	"time"
 )
 
@@ -9,6 +10,8 @@ type Weave struct {
 	Config       *Config
 	StartFailure int
 	Debug        bool
+	HTTPClient   *http.Client
+	BaseURL      string
 }
 
 // Config represents the expected Weave config
