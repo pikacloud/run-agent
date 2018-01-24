@@ -1,25 +1,29 @@
 package weave
 
 import (
-	"bufio"
-	"bytes"
-	"encoding/json"
 	"fmt"
 	"log"
 	"net"
+	"net/http"
 	"os"
 	"os/exec"
 	"strings"
+	"time"
 
 	"github.com/Sirupsen/logrus"
 )
 
 const (
-	weavePath = "/usr/local/bin/weave"
+	weavePath      = "/usr/local/bin/weave"
+	weaveHTTPAddr  = "127.0.0.1:6784"
+	defaultBaseURL = "http://127.0.0.1:6784"
 )
 
 var (
-	logger = logrus.New()
+	logger     = logrus.New()
+	httpClient = &http.Client{
+		Timeout: time.Second * 3,
+	}
 )
 
 func (c *Config) DNSDomainDotted() string {
@@ -223,52 +227,13 @@ func NewWeave(dnsdomain string, ipallocRange string, password string, debug bool
 			IPAllocRange: ipallocRange,
 			Password:     password,
 		},
+		HTTPClient: httpClient,
+		BaseURL:    defaultBaseURL,
 	}
 	if _, err := w.cli(nil, "version"); err != nil {
 		log.Fatalf("Cannot get weave version: %s", err)
 	}
 	return w
-}
-
-// Status returns weave status
-func (w *Weave) Status() (*Status, error) {
-	out, err := w.cli(nil, "report")
-	if err != nil {
-		return nil, fmt.Errorf("weave report returns an error: %s, %s", err, string(out))
-	}
-	status := &Status{}
-	if err := json.Unmarshal(out, &status); err != nil {
-		return nil, err
-	}
-	return status, nil
-}
-
-// PS returns weave ps
-func (w *Weave) PS(containerID string) ([]*PSOutput, error) {
-	out, err := w.cli(nil, "ps", containerID)
-	if err != nil {
-		return nil, fmt.Errorf("weave ps returns an error: %s, %s", err, string(out))
-	}
-	output := []*PSOutput{}
-	toScan := bytes.NewReader(out)
-	scanner := bufio.NewScanner(toScan)
-	for scanner.Scan() {
-		line := scanner.Text()
-		items := strings.Split(line, " ")
-		if len(items) < 2 {
-			continue
-		}
-		p := &PSOutput{
-			ContainerID: items[0],
-			MAC:         items[1],
-			IP:          items[2:],
-		}
-		output = append(output, p)
-	}
-	if err := scanner.Err(); err != nil {
-		return nil, fmt.Errorf("Cannot read weave ps output: %s", err)
-	}
-	return output, nil
 }
 
 // IsRunning check if weave container is running

@@ -42,10 +42,25 @@ PIKACLOUD_AGENT_LABELS="web,database=mysql,region=eu-west-1"
 
 ## For developers
 
+Build source code
+
 ```
 $ go get github.com/pikacloud/run-agent
 $ cd $HOME/go/src/github.com/run-agent
 $ [Env Variables...] ./run-agent
+```
+
+Run tests:
+
+```
+go test -v
+```
+
+Running inside a docker container:
+
+```
+$ docker build -t run-agent-dev .
+$ docker run -it --rm -e PIKACLOUD_WS_URL=ws://devserver:8080 -e PIKACLOUD_AGENT_URL=http://devserver:28002/api/ -e PIKACLOUD_API_TOKEN=XXXX -e PIKACLOUD_AGENT_LABELS="sandbox,builder,cluster" -e LOG_LEVEL=debug --net=host -v /var/run/docker.sock:/var/run/docker.sock --name=run-agent-dev run-agent-dev run-agent
 ```
 
 ### Environment variables

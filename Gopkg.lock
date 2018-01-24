@@ -158,6 +158,12 @@
 
 [[projects]]
   branch = "master"
+  name = "github.com/vishvananda/netns"
+  packages = ["."]
+  revision = "be1fbeda19366dea804f00efff2dd73a1642fdcc"
+
+[[projects]]
+  branch = "master"
   name = "github.com/xanzy/ssh-agent"
   packages = ["."]
   revision = "ba9c9e33906f58169366275e3450db66139a31a9"
@@ -213,6 +219,6 @@
 [solve-meta]
   analyzer-name = "dep"
   analyzer-version = 1
-  inputs-digest = "7e1978d3c4d6a89324c780de9832d1476ac1c270bc4c89674791b3a3ee91e0f8"
+  inputs-digest = "105ae16a3a96f5432277aa727ef391c064ad4b3d561a201ada659c1d24105ce6"
   solver-name = "gps-cdcl"
   solver-version = 1
