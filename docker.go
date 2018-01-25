@@ -90,6 +90,11 @@ type DockerImageTagOpts struct {
 	Target string `json:"target_image"`
 }
 
+// DockerRmiOpts describes docker rmi options
+type DockerRmiOpts struct {
+	Images []string `json:"images"`
+}
+
 // DockerPullOpts describes docker pull options
 type DockerPullOpts struct {
 	Image                string                `json:"image"`
@@ -306,7 +311,7 @@ func (agent *Agent) initTrackedContainers() error {
 }
 
 func (step *TaskStep) dockerPush(opts *DockerPushOpts) error {
-	step.stream([]byte(fmt.Sprintf("\033[33m[PUSH]\033[0m Pushing docker image %s\n", opts.Image)))
+	step.stream([]byte(fmt.Sprintf("\033[33m[PUSH]\033[0m Pushing docker image %s\r\n", opts.Image)))
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	pushOpts := docker_types.ImagePushOptions{}
@@ -335,17 +340,18 @@ func (step *TaskStep) dockerPush(opts *DockerPushOpts) error {
 		}
 		if j.Stream != "" {
 			step.stream([]byte(j.Stream))
-		}
-		if j.Status != "" {
-			if j.Progress != nil {
-				wasInProgress = true
-				step.stream([]byte(fmt.Sprintf("%s\r", j.Status)))
-			} else {
-				if wasInProgress {
-					step.stream([]byte("\n"))
-					wasInProgress = false
+		} else {
+			if j.Status != "" {
+				if j.Progress != nil {
+					wasInProgress = true
+					step.stream([]byte(fmt.Sprintf("%s\r", j.Status)))
+				} else {
+					if wasInProgress {
+						step.stream([]byte("\r\n"))
+						wasInProgress = false
+					}
+					step.stream([]byte(fmt.Sprintf("%s\r\n", j.Status)))
 				}
-				step.stream([]byte(fmt.Sprintf("%s\r\n", j.Status)))
 			}
 		}
 	}
@@ -617,7 +623,7 @@ func (step *TaskStep) dockerBuild(opts *DockerBuildOpts) error {
 		ForceRemove: opts.ForceRemoveIntermediateContainers,
 		PullParent:  true,
 	}
-	step.stream([]byte(fmt.Sprintf("\033[33m[BUILD]\033[0m Building docker image %s\n", opts.Tag)))
+	step.stream([]byte(fmt.Sprintf("\033[33m[BUILD]\033[0m Building docker image %s\r\n", opts.Tag)))
 	buildResponse, err := agent.DockerClient.ImageBuild(ctx, body, buildOpts)
 	if err != nil {
 		return err
@@ -1133,8 +1139,26 @@ func (step *TaskStep) Docker() error {
 		if err != nil {
 			return fmt.Errorf("Bad config for docker tag: %s (%v)", err, step.PluginConfig)
 		}
+		step.stream([]byte(fmt.Sprintf("\033[33m[TAG]\033[0m %s as %s\r\n", tagOpts.Source, tagOpts.Target)))
 		if err := agent.DockerClient.ImageTag(context.Background(), tagOpts.Source, tagOpts.Target); err != nil {
 			return fmt.Errorf("Unable to tag image: %+v", err)
+		}
+		return nil
+	case "rmi":
+		var rmiOpts = DockerRmiOpts{}
+		err := json.Unmarshal([]byte(step.PluginConfig), &rmiOpts)
+		if err != nil {
+			return fmt.Errorf("Bad config for docker rmi: %s (%v)", err, step.PluginConfig)
+		}
+		removeOpts := docker_types.ImageRemoveOptions{
+			PruneChildren: true,
+		}
+		for _, image := range rmiOpts.Images {
+			step.stream([]byte(fmt.Sprintf("\033[33m[REMOVE_LOCAL_IMAGE]\033[0m %s\r\n", image)))
+			_, err := agent.DockerClient.ImageRemove(context.Background(), image, removeOpts)
+			if err != nil {
+				return fmt.Errorf("Unable to remove image: %+v", err)
+			}
 		}
 		return nil
 	case "build":
