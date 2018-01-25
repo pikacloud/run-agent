@@ -1,15 +1,21 @@
 package main
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
+	"time"
+
+	fernet "github.com/fernet/fernet-go"
 
 	git "gopkg.in/src-d/go-git.v4"
 	"gopkg.in/src-d/go-git.v4/plumbing"
 
+	"golang.org/x/crypto/ssh"
 	"gopkg.in/src-d/go-git.v4/plumbing/transport"
+	gitSSH "gopkg.in/src-d/go-git.v4/plumbing/transport/ssh"
 
 	gitConfig "gopkg.in/src-d/go-git.v4/config"
 	gitClient "gopkg.in/src-d/go-git.v4/plumbing/transport/client"
@@ -19,9 +25,19 @@ import (
 
 // GitCloneOpts describes options for git clone
 type GitCloneOpts struct {
-	Path   string `json:"path"`
-	URL    string `json:"repository_url"`
-	GitRef string `json:"git_ref"`
+	Path    string `json:"path"`
+	URL     string `json:"repository_url"`
+	GitRef  string `json:"git_ref"`
+	SSHKey  string `json:"sshkey"`
+	SSHUser string `json:"sshuser"`
+}
+
+func (o *GitCloneOpts) searchSSHUser() string {
+	s := strings.Split(o.URL, "@")
+	if len(s) > 1 {
+		return s[0]
+	}
+	return ""
 }
 
 // Git handles git functions
@@ -37,9 +53,31 @@ func (step *TaskStep) Git() error {
 		if cloneOpts.GitRef == "" {
 			cloneOpts.GitRef = "master"
 		}
-		references, err := inMemorylsRemote(cloneOpts.URL, nil)
-		if err != nil {
-			return fmt.Errorf("Unable to list remote reference for %s: %+v", cloneOpts.URL, err)
+		if cloneOpts.SSHUser == "" && cloneOpts.SSHKey != "" {
+			// try to extract the user name from the repository URL
+			user := cloneOpts.searchSSHUser()
+			if user == "" {
+				user = "git"
+			}
+			cloneOpts.SSHUser = user
+		}
+		// check if a ssh key is given
+		var auth transport.AuthMethod
+		if cloneOpts.SSHKey != "" {
+			bytesKey := make([]byte, 32)
+			copy(bytesKey, []byte(agent.ID))
+			fKey := base64.StdEncoding.EncodeToString(bytesKey)
+			k := fernet.MustDecodeKeys(fKey)
+			sshkey := fernet.VerifyAndDecrypt([]byte(cloneOpts.SSHKey), 60*time.Second, k)
+			signer, errParseKey := ssh.ParsePrivateKey([]byte(sshkey))
+			if errParseKey != nil {
+				return fmt.Errorf("Unable to parse private SSH key: %s", errParseKey)
+			}
+			auth = &gitSSH.PublicKeys{User: cloneOpts.SSHUser, Signer: signer}
+		}
+		references, errAuth := inMemorylsRemote(cloneOpts.URL, auth)
+		if errAuth != nil {
+			return fmt.Errorf("Unable to list remote reference for %s: %+v", cloneOpts.URL, errAuth)
 		}
 		reference, err := resolveRawReference(cloneOpts.GitRef, references)
 		if err != nil {
@@ -49,11 +87,14 @@ func (step *TaskStep) Git() error {
 		if errMkdir != nil {
 			return errMkdir
 		}
-		step.stream([]byte(fmt.Sprintf("\033[33m[GIT]\033[0m cloning %s, using %s %s\n", cloneOpts.URL, reference.Type(), reference.String())))
+		step.stream([]byte(fmt.Sprintf("\033[33m[GIT]\033[0m cloning %s, using %s %s\r\n", cloneOpts.URL, reference.Type(), reference.String())))
 		cloneOptions := &git.CloneOptions{
 			URL:           cloneOpts.URL,
 			Depth:         1,
 			ReferenceName: reference.Name(),
+		}
+		if auth != nil {
+			cloneOptions.Auth = auth
 		}
 		if step.Task.Stream {
 			cloneOptions.Progress = step.Task.streamer.ioWriter
@@ -61,7 +102,7 @@ func (step *TaskStep) Git() error {
 		repository, errClone := git.PlainClone(cloneOpts.Path, false, cloneOptions)
 		if errClone != nil {
 			os.RemoveAll(cloneOpts.Path)
-			return errClone
+			return fmt.Errorf("Unable to clone %s", errClone)
 		}
 
 		logger.Debugf("%s cloned in %s", cloneOpts.URL, cloneOpts.Path)
@@ -99,7 +140,7 @@ func inMemorylsRemote(repoURL string, auth transport.AuthMethod) (memory.Referen
 	if err != nil {
 		return nil, err
 	}
-	remotes, err := lsRemote(remote, nil)
+	remotes, err := lsRemote(remote, auth)
 	if err != nil {
 		return nil, err
 	}
@@ -127,7 +168,6 @@ func newUploadPackSession(url string, auth transport.AuthMethod) (transport.Uplo
 	if err != nil {
 		return nil, err
 	}
-
 	return c.NewUploadPackSession(ep, auth)
 }
 
@@ -136,7 +176,6 @@ func newGitClient(url string) (transport.Transport, transport.Endpoint, error) {
 	if err != nil {
 		return nil, nil, err
 	}
-
 	c, err := gitClient.NewClient(ep)
 	if err != nil {
 		return nil, nil, err
