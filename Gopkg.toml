@@ -67,7 +67,12 @@
 [[override]]
   name = "gopkg.in/src-d/go-git.v4"
 	source = "https://github.com/src-d/go-git.git"
-  revision = "v4.0.0-rc15"
+  revision = "v4.1.0"
+
+[[override]]
+  name = "gopkg.in/src-d/go-billy.v4"
+	source = "https://github.com/src-d/go-billy.git"
+  revision = "v4.0.2"
 
 [[override]]
   name = "github.com/docker/docker"

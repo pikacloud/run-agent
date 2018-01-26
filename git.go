@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"net"
 	"os"
 	"strings"
 	"time"
@@ -40,6 +41,23 @@ func (o *GitCloneOpts) searchSSHUser() string {
 	return ""
 }
 
+func (o *GitCloneOpts) auth(key []byte) (*gitSSH.PublicKeys, error) {
+	if o.SSHKey == "" {
+		return nil, nil
+	}
+	bytesKey := make([]byte, 32)
+	copy(bytesKey, key)
+	fKey := base64.StdEncoding.EncodeToString(bytesKey)
+	k := fernet.MustDecodeKeys(fKey)
+	sshkey := fernet.VerifyAndDecrypt([]byte(o.SSHKey), 60*time.Second, k)
+	auth, err := gitSSH.NewPublicKeys(o.SSHUser, sshkey, "")
+	auth.HostKeyCallback = func(hostname string, remote net.Addr, key ssh.PublicKey) error { return nil }
+	if err != nil {
+		return nil, fmt.Errorf("error on parsing private key: %+v", err)
+	}
+	return auth, nil
+}
+
 // Git handles git functions
 func (step *TaskStep) Git() error {
 	switch step.Method {
@@ -61,19 +79,9 @@ func (step *TaskStep) Git() error {
 			}
 			cloneOpts.SSHUser = user
 		}
-		// check if a ssh key is given
-		var auth transport.AuthMethod
-		if cloneOpts.SSHKey != "" {
-			bytesKey := make([]byte, 32)
-			copy(bytesKey, []byte(agent.ID))
-			fKey := base64.StdEncoding.EncodeToString(bytesKey)
-			k := fernet.MustDecodeKeys(fKey)
-			sshkey := fernet.VerifyAndDecrypt([]byte(cloneOpts.SSHKey), 60*time.Second, k)
-			signer, errParseKey := ssh.ParsePrivateKey([]byte(sshkey))
-			if errParseKey != nil {
-				return fmt.Errorf("Unable to parse private SSH key: %s", errParseKey)
-			}
-			auth = &gitSSH.PublicKeys{User: cloneOpts.SSHUser, Signer: signer}
+		auth, err := cloneOpts.auth([]byte(agent.ID))
+		if err != nil {
+			return err
 		}
 		references, errAuth := inMemorylsRemote(cloneOpts.URL, auth)
 		if errAuth != nil {
@@ -171,7 +179,7 @@ func newUploadPackSession(url string, auth transport.AuthMethod) (transport.Uplo
 	return c.NewUploadPackSession(ep, auth)
 }
 
-func newGitClient(url string) (transport.Transport, transport.Endpoint, error) {
+func newGitClient(url string) (transport.Transport, *transport.Endpoint, error) {
 	ep, err := transport.NewEndpoint(url)
 	if err != nil {
 		return nil, nil, err
