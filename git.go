@@ -10,16 +10,15 @@ import (
 	"time"
 
 	fernet "github.com/fernet/fernet-go"
-
+	"golang.org/x/crypto/ssh"
 	git "gopkg.in/src-d/go-git.v4"
 	"gopkg.in/src-d/go-git.v4/plumbing"
 
-	"golang.org/x/crypto/ssh"
 	"gopkg.in/src-d/go-git.v4/plumbing/transport"
-	gitSSH "gopkg.in/src-d/go-git.v4/plumbing/transport/ssh"
 
 	gitConfig "gopkg.in/src-d/go-git.v4/config"
 	gitClient "gopkg.in/src-d/go-git.v4/plumbing/transport/client"
+	gitSSH "gopkg.in/src-d/go-git.v4/plumbing/transport/ssh"
 	"gopkg.in/src-d/go-git.v4/storage/memory"
 	"gopkg.in/src-d/go-git.v4/utils/ioutil"
 )
@@ -50,12 +49,12 @@ func (o *GitCloneOpts) auth(key []byte) (*gitSSH.PublicKeys, error) {
 	fKey := base64.StdEncoding.EncodeToString(bytesKey)
 	k := fernet.MustDecodeKeys(fKey)
 	sshkey := fernet.VerifyAndDecrypt([]byte(o.SSHKey), 60*time.Second, k)
-	auth, err := gitSSH.NewPublicKeys(o.SSHUser, sshkey, "")
-	auth.HostKeyCallback = func(hostname string, remote net.Addr, key ssh.PublicKey) error { return nil }
+	authSSH, err := gitSSH.NewPublicKeys(o.SSHUser, sshkey, "")
 	if err != nil {
 		return nil, fmt.Errorf("error on parsing private key: %+v", err)
 	}
-	return auth, nil
+	authSSH.HostKeyCallback = func(hostname string, remote net.Addr, key ssh.PublicKey) error { return nil }
+	return authSSH, nil
 }
 
 // Git handles git functions
@@ -79,9 +78,13 @@ func (step *TaskStep) Git() error {
 			}
 			cloneOpts.SSHUser = user
 		}
-		auth, err := cloneOpts.auth([]byte(agent.ID))
-		if err != nil {
-			return err
+		var auth transport.AuthMethod
+		authSSH, errAuth := cloneOpts.auth([]byte(agent.ID))
+		if errAuth != nil {
+			return errAuth
+		}
+		if authSSH != nil {
+			auth = authSSH
 		}
 		references, errAuth := inMemorylsRemote(cloneOpts.URL, auth)
 		if errAuth != nil {
