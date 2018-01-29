@@ -15,7 +15,7 @@ type AgentPeerConnection struct {
 	Port             int    `json:"port"`
 	State            string `json:"state"`
 	Info             string `json:"info"`
-	Blacklisted      bool   `json:"blacklisted"`
+	Blacklisted      int64  `json:"blacklisted"`
 	Outbound         bool   `json:"outbound"`
 	ForgetInProgress bool   `json:"forget_in_progress"`
 	Name             string `json:"name"`
@@ -70,6 +70,12 @@ func (agent *Agent) readMeshInfo() (map[string]*AgentPeerConnection, error) {
 // connectPeers connects agent to other peers
 func (agent *Agent) connectPeers(ips []string) error {
 	for _, ip := range ips {
+		for _, peer := range agent.peers {
+			if peer.IP == ip && peer.Blacklisted > 0 {
+				logger.Debugf("Skipping connection to blacklisted peer ip %s", ip)
+				continue
+			}
+		}
 		if err := agent.weave.Connect(ip); err != nil {
 			return err
 		}
@@ -77,7 +83,7 @@ func (agent *Agent) connectPeers(ips []string) error {
 	return nil
 }
 
-// connectPeers connects agent to other peers
+// forgetPeers connects agent to other peers
 func (agent *Agent) forgetPeers(ips []string) error {
 	for _, ip := range ips {
 		if err := agent.weave.Forget(ip); err != nil {
@@ -88,19 +94,29 @@ func (agent *Agent) forgetPeers(ips []string) error {
 	t := 0
 	var has string
 	for {
-		has = ""
+		currentPeers, err := agent.readMeshInfo()
+		if err != nil {
+			return err
+		}
 		for _, ip := range ips {
-			for _, peer := range agent.peers {
-				if peer.IP == ip {
+			has = ""
+			for _, currentPeer := range currentPeers {
+				if currentPeer.IP == ip {
 					has = ip
-					break
+				}
+			}
+			if has == "" {
+				for _, agentPeer := range agent.peers {
+					if agentPeer.IP == ip {
+						delete(agent.peers, agentPeer.key())
+					}
 				}
 			}
 		}
-		time.Sleep(1 * time.Second)
 		if has == "" {
 			break
 		}
+		time.Sleep(1 * time.Second)
 		if t > maxTries {
 			return fmt.Errorf("Cannot forget peer %s", has)
 		}

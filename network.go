@@ -139,6 +139,7 @@ func (agent *Agent) handleSuperNetwork() error {
 	}
 
 	agent.weave = weave_plugin.NewWeave(config.DNSDomain, config.Cidr, agent.superNetwork.decodeKey(agent.ID), debug)
+	agent.peers = make(map[string]*AgentPeerConnection)
 	status, err := agent.weave.Auto()
 	if err != nil {
 		return err
@@ -178,12 +179,14 @@ func (agent *Agent) syncNetworkRouterStatus() error {
 		return fmt.Errorf("Network router subsystem not yet initialized")
 	}
 	// sync mesh status if necessary
-	currentPeers, err := agent.readMeshInfo()
+	weavePeers, err := agent.readMeshInfo()
 	if err != nil {
 		return err
 	}
 	lock.Lock()
-	agent.peers = currentPeers
+	for key, peer := range weavePeers {
+		agent.peers[key] = peer
+	}
 	lock.Unlock()
 	currentInterfaces, err := agent.getNetInterfaces()
 	if err != nil {
@@ -344,17 +347,35 @@ func (step *TaskStep) Network() error {
 		if err != nil {
 			return fmt.Errorf("Bad config for network connect: %s (%v)", err, step.PluginConfig)
 		}
-		atLeastOneReachable := false
+		healthyIPs := []string{}
 		for _, ip := range connectOpts.IPs {
-			if errTCP := agent.weave.TestTCPConnection(ip); errTCP == nil {
-				atLeastOneReachable = true
-				break
+			blacklistedPeer := &AgentPeerConnection{
+				IP:          ip,
+				Port:        6783,
+				Blacklisted: time.Now().Unix(),
+				Outbound:    true,
+			}
+			if peer := agent.peers[blacklistedPeer.key()]; peer != nil {
+				if peer.Blacklisted > 0 {
+					continue
+				}
+			}
+			if errTCP := agent.weave.TestTCPConnection(ip); errTCP != nil {
+				logger.Debugf("Cannot connect to peer %s: %v", ip, errTCP)
+				blacklistedPeer.Info = errTCP.Error()
+				blacklistedPeer.State = "blacklisted"
+				agent.peers[blacklistedPeer.key()] = blacklistedPeer
+				if err := agent.syncNetworkRouterStatus(); err != nil {
+					return err
+				}
+			} else {
+				healthyIPs = append(healthyIPs, ip)
 			}
 		}
-		if !atLeastOneReachable {
-			return fmt.Errorf("No remote peers reachables in %s", strings.Join(connectOpts.IPs, ", "))
+		if len(healthyIPs) == 0 {
+			return fmt.Errorf("No remote peers reachables: %s", strings.Join(connectOpts.IPs, ", "))
 		}
-		err = agent.connectPeers(connectOpts.IPs)
+		err = agent.connectPeers(healthyIPs)
 		if err != nil {
 			return fmt.Errorf("Failure attempting to add connections to network router: %s", err)
 		}

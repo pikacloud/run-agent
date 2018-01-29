@@ -166,7 +166,10 @@ func (w *Weave) Attach(cid string, network string) (string, error) {
 
 // TestTCPConnection tries to connect to a remote weave router
 func (w *Weave) TestTCPConnection(ip string) error {
-	conn, err := net.Dial("tcp", fmt.Sprintf("%s:6783", ip))
+	dialer := net.Dialer{
+		Timeout: 3 * time.Second,
+	}
+	conn, err := dialer.Dial("tcp", fmt.Sprintf("%s:6783", ip))
 	if err != nil {
 		return err
 	}
