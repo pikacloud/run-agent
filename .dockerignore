@@ -1,3 +1,4 @@
 vendor/*
 run-agent
 dist/
+run-agent.sh
