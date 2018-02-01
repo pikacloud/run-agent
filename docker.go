@@ -150,8 +150,9 @@ type DockerRemoveOpts struct {
 
 // DockerTerminalOpts describes docker terminal options
 type DockerTerminalOpts struct {
-	Cid string `json:"cid"`
-	Tid string `json:"tid"`
+	Cid   string `json:"cid"`
+	Tid   string `json:"tid"`
+	Shell string `json:"shell"`
 }
 
 // DockerBuildOpts describes docker build options
@@ -679,6 +680,9 @@ func (agent *Agent) dockerTerminal(opts *DockerTerminalOpts) error {
 		return fmt.Errorf("Error dialing %s%s: %s", wsURL, path, err)
 	}
 	ctx := context.Background()
+	if opts.Shell == "" {
+		opts.Shell = "/bin/sh"
+	}
 	configExec := docker_types.ExecConfig{
 		Tty:          true,
 		AttachStdin:  true,
@@ -686,7 +690,7 @@ func (agent *Agent) dockerTerminal(opts *DockerTerminalOpts) error {
 		AttachStdout: true,
 		Detach:       false,
 		Env:          []string{"TERM=xterm"},
-		Cmd:          []string{"bash"},
+		Cmd:          []string{opts.Shell},
 	}
 	execCreateResponse, err := agent.DockerClient.ContainerExecCreate(ctx, opts.Cid, configExec)
 	if err != nil {
@@ -699,7 +703,7 @@ func (agent *Agent) dockerTerminal(opts *DockerTerminalOpts) error {
 	}
 	runningTerminalsList[opts] = true
 	defer func() {
-		logger.Info("Defer fx terminal")
+		logger.Debug("Terminating terminal")
 		errDeleteTerminal := terminal.Delete(pikacloudClient)
 		if errDeleteTerminal != nil {
 			logger.Info("Cannot delete terminal in API: %+v", errDeleteTerminal)
