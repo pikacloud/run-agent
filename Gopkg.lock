@@ -27,6 +27,12 @@
   revision = "ea383cf3ba6ec950874b8486cd72356d007c768f"
 
 [[projects]]
+  name = "github.com/blang/semver"
+  packages = ["."]
+  revision = "2ee87856327ba09384cabd113bc6b5d174e9ec0f"
+  version = "v3.5.1"
+
+[[projects]]
   name = "github.com/docker/distribution"
   packages = [".","context","digest","reference","uuid"]
   revision = "a25b9ef0c9fe242ac04bb20d3a028442b7d266b6"
@@ -225,6 +231,6 @@
 [solve-meta]
   analyzer-name = "dep"
   analyzer-version = 1
-  inputs-digest = "08b0ca8f971ac101828f2d751946088b2ad5c4a856b04bce5c7fd784416e3238"
+  inputs-digest = "f662ad5ff7d7dbc16a1229960875b030a271e720ea864103843286a544f33755"
   solver-name = "gps-cdcl"
   solver-version = 1

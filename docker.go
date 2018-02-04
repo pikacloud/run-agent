@@ -36,10 +36,12 @@ import (
 	"github.com/moby/moby/pkg/stringid"
 
 	"github.com/Sirupsen/logrus"
+	"github.com/blang/semver"
 )
 
 const (
 	defaultContainerStartWait = 3
+	minAPIVersion             = "1.13"
 )
 
 var (
@@ -533,6 +535,7 @@ func (agent *Agent) dockerRemove(containerID string, opts *DockerRemoveOpts) err
 	// first unpause container as we cannot remove a paused container
 	i, err := agent.DockerClient.ContainerInspect(context.Background(), containerID)
 	if err != nil {
+		deletetrackedContainer(containerID)
 		return fmt.Errorf("Error inspect container %s: %+v", containerID, err)
 	}
 	if i.State.Paused {
@@ -548,6 +551,7 @@ func (agent *Agent) dockerRemove(containerID string, opts *DockerRemoveOpts) err
 	}
 	ctx := context.Background()
 	if err := agent.DockerClient.ContainerRemove(ctx, containerID, removeOpts); err != nil {
+		deletetrackedContainer(containerID)
 		return err
 	}
 	deletetrackedContainer(containerID)
@@ -689,9 +693,27 @@ func (agent *Agent) dockerTerminal(opts *DockerTerminalOpts) error {
 		AttachStderr: true,
 		AttachStdout: true,
 		Detach:       false,
-		Env:          []string{"TERM=xterm"},
 		Cmd:          []string{opts.Shell},
 	}
+	serverVersion, errServerVersion := agent.DockerClient.ServerVersion(context.Background())
+	if errServerVersion != nil {
+		return errServerVersion
+	}
+	serverVersionParsed, err := semver.Parse(fmt.Sprintf("%s.0", serverVersion.APIVersion))
+	if err != nil {
+		return err
+	}
+	minAPIVersionParsed, err := semver.Parse(fmt.Sprintf("%s.0", minAPIVersion))
+	if err != nil {
+		return err
+	}
+	result := serverVersionParsed.Compare(minAPIVersionParsed)
+	if result < 0 {
+		logger.Debugf("Your Docker server version is too old (%s), minimum required version is (%s)", serverVersionParsed, minAPIVersionParsed)
+	} else {
+		configExec.Env = []string{"TERM=xterm"}
+	}
+
 	execCreateResponse, err := agent.DockerClient.ContainerExecCreate(ctx, opts.Cid, configExec)
 	if err != nil {
 		return fmt.Errorf("Cannot create container %s exec %+v: %s", opts.Cid, configExec, err)
@@ -897,20 +919,20 @@ func (agent *Agent) syncDockerContainer(containerID string) error {
 	return nil
 }
 
-func deletetrackedContainer(containerID string) error {
-	lock.Lock()
+func deletetrackedContainer(containerID string) {
 	if trackedContainers[containerID] != nil {
+		lock.Lock()
 		delete(trackedContainers, containerID)
+		lock.Unlock()
 		err := agent.unsyncDockerContainer(containerID)
 		if err != nil {
 			logger.Debugf("Cannot unsync container %s: %+v", containerID, err)
 			agent.forceSyncTrackedDockerContainers()
-			return nil
+			return
 		}
 		logger.WithFields(logrus.Fields{"cid": containerID}).Debug("Container unsynced")
 	}
-	lock.Unlock()
-	return nil
+	return
 }
 
 func (agent *Agent) forceSyncTrackedDockerContainers() error {

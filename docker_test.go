@@ -16,9 +16,12 @@ func TestDockerContainer(t *testing.T) {
 	}
 	err := agent.dockerPull(opts.PullOpts)
 	if err != nil {
-		t.Errorf("Cannot pull image nginx:latest: %v", err)
+		t.Fatalf("Cannot pull image nginx:latest: %v", err)
 	}
 	create, err := agent.dockerCreate(opts)
+	if err != nil {
+		t.Fatalf("Cannot create container %v: %v", opts, err)
+	}
 	defer func() {
 		command := "docker unpause foobar;docker inspect foobar && docker rm -vf foobar; docker rmi nginx:latest || echo"
 		cmd := exec.Command("/bin/sh", "-c", command)
@@ -27,9 +30,6 @@ func TestDockerContainer(t *testing.T) {
 			t.Errorf("Cannot remove container foobar: %v", errRun)
 		}
 	}()
-	if err != nil {
-		t.Errorf("Cannot create container %v: %v", opts, err)
-	}
 	command := fmt.Sprintf("docker inspect %s", create.ID)
 	cmd := exec.Command("/bin/sh", "-c", command)
 	errRun := cmd.Run()
