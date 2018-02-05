@@ -7,6 +7,9 @@ import (
 	"crypto/x509"
 	"encoding/pem"
 	"fmt"
+	"strings"
+
+	"github.com/blang/semver"
 )
 
 func sign(parsePrivKey func([]byte) (crypto.Signer, error), privatePEM string, source []byte) ([]byte, error) {
@@ -32,4 +35,17 @@ func sign(parsePrivKey func([]byte) (crypto.Signer, error), privatePEM string, s
 func signec(privatePEM string, source []byte) ([]byte, error) {
 	parseFn := func(p []byte) (crypto.Signer, error) { return x509.ParseECPrivateKey(p) }
 	return sign(parseFn, privatePEM, source)
+}
+
+func semverParse(v string) (semver.Version, error) {
+	s := strings.Split(v, ".")
+	if len(s) < 3 {
+		v = fmt.Sprintf("%s.0", v)
+		return semverParse(v)
+	}
+	semVer, err := semver.Parse(v)
+	if err != nil {
+		return semver.Version{}, err
+	}
+	return semVer, nil
 }

@@ -6,6 +6,26 @@ import (
 	"testing"
 )
 
+func TestAtLeastDockerServerVersion(t *testing.T) {
+	var testMinServerVersions = []struct {
+		v        string
+		expected bool
+	}{
+		{"0.1.0", true},
+		{"99.1.0", false},
+	}
+	for _, testMinServerVersion := range testMinServerVersions {
+		v, err := agent.atLeastDockerServerAPIVersion(testMinServerVersion.v)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if v != testMinServerVersion.expected {
+			t.Errorf("v want %v, got %v", testMinServerVersion.expected, v)
+		}
+	}
+
+}
+
 func TestDockerContainer(t *testing.T) {
 	opts := &DockerCreateOpts{
 		Name:   "foobar",

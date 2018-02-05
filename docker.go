@@ -36,12 +36,11 @@ import (
 	"github.com/moby/moby/pkg/stringid"
 
 	"github.com/Sirupsen/logrus"
-	"github.com/blang/semver"
 )
 
 const (
 	defaultContainerStartWait = 3
-	minAPIVersion             = "1.13"
+	minAPIVersion             = "1.25"
 )
 
 var (
@@ -206,6 +205,25 @@ type syncDockerContainersOptions struct {
 type containerLog struct {
 	containerID string
 	msg         []byte
+}
+
+func (agent *Agent) atLeastDockerServerAPIVersion(minVersion string) (bool, error) {
+	serverVersion, errServerVersion := agent.DockerClient.ServerVersion(context.Background())
+	if errServerVersion != nil {
+		return false, errServerVersion
+	}
+	serverVersionParsed, err := semverParse(serverVersion.APIVersion)
+	if err != nil {
+		return false, err
+	}
+	minAPIVersionParsed, err := semverParse(minVersion)
+	if err != nil {
+		return false, err
+	}
+	if serverVersionParsed.LT(minAPIVersionParsed) {
+		return false, nil
+	}
+	return true, nil
 }
 
 func searchDockerServerAPIVersion() (string, error) {
@@ -695,25 +713,13 @@ func (agent *Agent) dockerTerminal(opts *DockerTerminalOpts) error {
 		Detach:       false,
 		Cmd:          []string{opts.Shell},
 	}
-	serverVersion, errServerVersion := agent.DockerClient.ServerVersion(context.Background())
-	if errServerVersion != nil {
-		return errServerVersion
-	}
-	serverVersionParsed, err := semver.Parse(fmt.Sprintf("%s.0", serverVersion.APIVersion))
+	envConfigExecSupported, err := agent.atLeastDockerServerAPIVersion(minAPIVersion)
 	if err != nil {
 		return err
 	}
-	minAPIVersionParsed, err := semver.Parse(fmt.Sprintf("%s.0", minAPIVersion))
-	if err != nil {
-		return err
-	}
-	result := serverVersionParsed.Compare(minAPIVersionParsed)
-	if result < 0 {
-		logger.Debugf("Your Docker server version is too old (%s), minimum required version is (%s)", serverVersionParsed, minAPIVersionParsed)
-	} else {
+	if envConfigExecSupported {
 		configExec.Env = []string{"TERM=xterm"}
 	}
-
 	execCreateResponse, err := agent.DockerClient.ContainerExecCreate(ctx, opts.Cid, configExec)
 	if err != nil {
 		return fmt.Errorf("Cannot create container %s exec %+v: %s", opts.Cid, configExec, err)
@@ -796,7 +802,7 @@ func (agent *Agent) dockerTerminal(opts *DockerTerminalOpts) error {
 			}
 
 			if read != 1 {
-				logger.Infof("Unexpected number of bytes read %+v", read)
+				logger.Infof("Unexpected number of bytes read %+v  ", read)
 				quit = true
 				return
 			}
